@@ -2,6 +2,14 @@
 
 A small academic character-level GPT built with Python and PyTorch. It implements the core pieces of a local language model: tokenizer, dataset batching, causal self-attention, Transformer blocks, training, checkpointing, and sampling.
 
+## What this is
+
+Vibroso is a from-scratch educational character-level GPT-style language model.
+
+## What this is not
+
+It is not a production LLM, chatbot, or instruction-following assistant.
+
 ## Setup
 
 ```bash
