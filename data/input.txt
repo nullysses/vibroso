@@ -1,0 +1,26 @@
+This is a tiny sample corpus for the toy language model.
+It is intentionally small so the project can run a quick smoke test.
+Replace this file with a larger plain text corpus before serious training.
+
+The model reads characters, predicts the next character, and slowly learns local patterns.
+Small models trained on tiny datasets will generate strange text, but the training loop,
+checkpointing code, and generation path should still be easy to inspect.
+
+hello toy model.
+hello tiny transformer.
+hello academic language model.
+
+The same short lesson repeats with small variations.
+The tokenizer maps every character to a number.
+The dataset returns blocks of numbers and shifted targets.
+The transformer attends only to previous positions.
+The optimizer nudges the weights after each loss.
+The checkpoint stores weights, optimizer state, config, and vocabulary.
+The generator samples one new character at a time.
+
+hello toy model.
+hello tiny transformer.
+hello academic language model.
+The model reads characters and predicts characters.
+The small corpus is only a teaching aid.
+The generated text should look rough but connected to the input.

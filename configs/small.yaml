@@ -1,0 +1,22 @@
+dataset_path: data/input.txt
+checkpoint_dir: checkpoints
+
+seed: 1337
+device: auto
+
+train_split: 0.9
+batch_size: 64
+block_size: 256
+
+max_steps: 10000
+eval_interval: 500
+eval_iters: 100
+checkpoint_interval: 1000
+learning_rate: 0.0003
+weight_decay: 0.1
+
+model:
+  n_embd: 384
+  n_head: 6
+  n_layer: 6
+  dropout: 0.2
