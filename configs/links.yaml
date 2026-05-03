@@ -1,5 +1,7 @@
 dataset_path: data/my_links_corpus.txt
 dataset_kind: url_list
+tokenizer_kind: subword
+tokenizer_vocab_size: 512
 corpus_cache_path: data/fetched_links_corpus.txt
 fetch_timeout: 20
 user_agent: "toy-llm/0.1 academic corpus builder"

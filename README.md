@@ -1,6 +1,6 @@
 # Vibroso
 
-A small academic character-level GPT built with Python and PyTorch. It implements the core pieces of a local language model: tokenizer, dataset batching, causal self-attention, Transformer blocks, training, checkpointing, and sampling.
+A small academic GPT-style language model built with Python and PyTorch. It implements the core pieces of a local language model: tokenization, dataset batching, causal self-attention, Transformer blocks, training, checkpointing, and sampling.
 
 ## What this is
 
@@ -27,6 +27,8 @@ python scripts/train.py --config configs/tiny.yaml
 ```
 
 Checkpoints are written to `checkpoints/latest.pt`.
+
+The default tokenizer is a small trainable subword tokenizer. It learns frequent adjacent character merges from the training corpus and stores the learned vocabulary in the checkpoint. Use `tokenizer_kind: char` in a config if you want the original character-level behavior.
 
 To train from a list of URLs, put one URL per line in `data/my_links_corpus.txt` and run:
 
@@ -76,6 +78,12 @@ Prompts can only contain characters seen in the training corpus. Version 1 raise
 
 ```bash
 python scripts/inspect_tokenizer.py --dataset data/input.txt
+```
+
+The inspector uses the subword tokenizer by default. To inspect the character tokenizer instead:
+
+```bash
+python scripts/inspect_tokenizer.py --dataset data/input.txt --tokenizer char
 ```
 
 For a URL list:

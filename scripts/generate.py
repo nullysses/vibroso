@@ -14,7 +14,7 @@ from toy_llm.checkpoint import load_checkpoint
 from toy_llm.config import Config
 from toy_llm.device import get_device
 from toy_llm.model import TinyGPT
-from toy_llm.tokenizer import CharTokenizer
+from toy_llm.tokenizer import tokenizer_from_dict
 
 
 def parse_args() -> argparse.Namespace:
@@ -36,7 +36,7 @@ def main() -> None:
     device = get_device(args.device)
     checkpoint = load_checkpoint(args.checkpoint, device)
     config = Config.from_dict(checkpoint["config"])
-    tokenizer = CharTokenizer.from_dict(checkpoint["tokenizer"])
+    tokenizer = tokenizer_from_dict(checkpoint["tokenizer"])
     model = TinyGPT(
         vocab_size=tokenizer.vocab_size,
         block_size=config.block_size,

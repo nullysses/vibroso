@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
 
 from toy_llm.config import Config
 from toy_llm.dataset import load_corpus
-from toy_llm.tokenizer import CharTokenizer
+from toy_llm.tokenizer import build_tokenizer
 
 
 def main() -> None:
@@ -24,6 +24,8 @@ def main() -> None:
     )
     parser.add_argument("--cache", default=None, help="Optional cache file for fetched URL corpus.")
     parser.add_argument("--language", default="en", help="Wikipedia language code.")
+    parser.add_argument("--tokenizer", choices=["subword", "char"], default="subword")
+    parser.add_argument("--vocab-size", type=int, default=256)
     args = parser.parse_args()
 
     dataset_kind = "text"
@@ -39,13 +41,15 @@ def main() -> None:
         wikipedia_language=args.language,
     )
     text = load_corpus(config)
-    tokenizer = CharTokenizer.from_text(text)
+    tokenizer = build_tokenizer(text, kind=args.tokenizer, vocab_size=args.vocab_size)
     print(f"characters: {len(text)}")
     print(f"tokens: {len(tokenizer.encode(text))}")
+    print(f"tokenizer: {args.tokenizer}")
     print(f"vocab_size: {tokenizer.vocab_size}")
     print("vocabulary:")
-    for idx, ch in enumerate(tokenizer.chars):
-        printable = ch if ch not in {"\n", "\t", "\r"} else repr(ch)
+    tokens = getattr(tokenizer, "tokens", getattr(tokenizer, "chars"))
+    for idx, token in enumerate(tokens):
+        printable = token if token not in {"\n", "\t", "\r"} else repr(token)
         print(f"{idx:>3}: {printable}")
 
 

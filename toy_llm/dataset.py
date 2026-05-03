@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 import torch
 
 from toy_llm.config import Config
-from toy_llm.tokenizer import CharTokenizer
+from toy_llm.tokenizer import Tokenizer
 
 
 def load_text(path: str | Path) -> str:
@@ -219,7 +219,7 @@ class TextDataset:
     def from_text(
         cls,
         text: str,
-        tokenizer: CharTokenizer,
+        tokenizer: Tokenizer,
         train_split: float,
         block_size: int,
         batch_size: int,

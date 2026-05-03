@@ -16,7 +16,7 @@ from toy_llm.dataset import TextDataset, load_corpus
 from toy_llm.device import get_device
 from toy_llm.model import TinyGPT
 from toy_llm.sampling import count_parameters
-from toy_llm.tokenizer import CharTokenizer
+from toy_llm.tokenizer import build_tokenizer, tokenizer_from_dict
 from toy_llm.train_loop import train
 
 
@@ -39,13 +39,17 @@ def main() -> None:
         checkpoint = load_checkpoint(args.resume, device)
         config = Config.from_dict(checkpoint["config"])
         device = get_device(config.device)
-        tokenizer = CharTokenizer.from_dict(checkpoint["tokenizer"])
+        tokenizer = tokenizer_from_dict(checkpoint["tokenizer"])
         start_step = int(checkpoint.get("step", 0))
         optimizer_state = checkpoint.get("optimizer_state_dict")
 
     text = load_corpus(config)
     if not args.resume:
-        tokenizer = CharTokenizer.from_text(text)
+        tokenizer = build_tokenizer(
+            text,
+            kind=config.tokenizer_kind,
+            vocab_size=config.tokenizer_vocab_size,
+        )
     dataset = TextDataset.from_text(
         text,
         tokenizer,
@@ -69,6 +73,7 @@ def main() -> None:
     print(f"device: {device}")
     print(f"dataset chars: {len(text)}")
     print(f"dataset tokens: {len(tokenizer.encode(text))}")
+    print(f"tokenizer: {config.tokenizer_kind}")
     print(f"vocab_size: {tokenizer.vocab_size}")
     print(f"parameters: {count_parameters(model):,}")
 

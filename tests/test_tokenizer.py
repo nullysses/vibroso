@@ -1,6 +1,6 @@
 import pytest
 
-from toy_llm.tokenizer import CharTokenizer
+from toy_llm.tokenizer import CharTokenizer, SubwordTokenizer, build_tokenizer, tokenizer_from_dict
 
 
 def test_vocabulary_construction_is_deterministic():
@@ -25,3 +25,22 @@ def test_serialized_tokenizer_can_be_restored():
     restored = CharTokenizer.from_dict(tokenizer.to_dict())
     assert restored.chars == ["a", "b", "c"]
     assert restored.decode(restored.encode("cab")) == "cab"
+
+
+def test_subword_tokenizer_round_trips_and_learns_merges():
+    tokenizer = SubwordTokenizer.from_text("abababab", vocab_size=5)
+    assert tokenizer.decode(tokenizer.encode("abab")) == "abab"
+    assert tokenizer.vocab_size > len(tokenizer.chars)
+    assert len(tokenizer.encode("abab")) < 4
+
+
+def test_subword_tokenizer_serializes_and_restores():
+    tokenizer = SubwordTokenizer.from_text("hello hello hello", vocab_size=10)
+    restored = tokenizer_from_dict(tokenizer.to_dict())
+    assert restored.decode(restored.encode("hello hello")) == "hello hello"
+    assert restored.vocab_size == tokenizer.vocab_size
+
+
+def test_build_tokenizer_defaults_to_subword():
+    tokenizer = build_tokenizer("abc abc abc", vocab_size=8)
+    assert isinstance(tokenizer, SubwordTokenizer)

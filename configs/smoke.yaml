@@ -1,4 +1,6 @@
 dataset_path: data/input.txt
+tokenizer_kind: subword
+tokenizer_vocab_size: 128
 checkpoint_dir: checkpoints
 
 seed: 1337
