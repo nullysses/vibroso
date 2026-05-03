@@ -1,4 +1,4 @@
-# Toy LLM
+# Vibroso
 
 A small academic character-level GPT built with Python and PyTorch. It implements the core pieces of a local language model: tokenizer, dataset batching, causal self-attention, Transformer blocks, training, checkpointing, and sampling.
 
