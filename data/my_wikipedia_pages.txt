@@ -1,4 +1,0 @@
-# One Wikipedia page title per line. Blank lines and comments are ignored.
-Artificial intelligence
-Language model
-Transformer (deep learning architecture)
