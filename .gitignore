@@ -1,0 +1,46 @@
+# Model checkpoints / training artifacts
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Large generated datasets / corpora
+data/*.txt
+data/*.jsonl
+data/*.json
+data/*.csv
+data/*.parquet
+data/*.pkl
+
+# Keep placeholder files
+!checkpoints/.gitkeep
+!data/.gitkeep
+
+# Training logs / experiment outputs
+runs/
+wandb/
+mlruns/
+logs/
+*.log
+
+# Python cache / build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
