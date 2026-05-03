@@ -28,6 +28,22 @@ python scripts/train.py --config configs/links.yaml
 
 `dataset_kind: url_list` makes the trainer fetch each URL, strip basic HTML into readable text, cache the combined corpus at `data/fetched_links_corpus.txt`, and train from that cache on later runs. Delete the cache file when you want to re-fetch the URLs.
 
+To train from Wikipedia page titles, put one title per line in `data/my_wikipedia_pages.txt`:
+
+```text
+Artificial intelligence
+Language model
+Transformer (deep learning architecture)
+```
+
+Then run:
+
+```bash
+python scripts/train.py --config configs/wikipedia.yaml
+```
+
+`dataset_kind: wikipedia_titles` uses the `wikipedia-api` package, calls `page(title).text` for each listed title, caches the combined text at `data/fetched_wikipedia_corpus.txt`, and trains from that cache on later runs.
+
 To resume training:
 
 ```bash
@@ -58,6 +74,12 @@ For a URL list:
 
 ```bash
 python scripts/inspect_tokenizer.py --dataset data/my_links_corpus.txt --url-list --cache data/fetched_links_corpus.txt
+```
+
+For Wikipedia page titles:
+
+```bash
+python scripts/inspect_tokenizer.py --dataset data/my_wikipedia_pages.txt --wikipedia-titles --cache data/fetched_wikipedia_corpus.txt
 ```
 
 ## Tests

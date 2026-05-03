@@ -1,7 +1,13 @@
 import torch
 import pytest
 
-from toy_llm.dataset import TextDataset, html_to_text, parse_url_list
+from toy_llm.dataset import (
+    TextDataset,
+    html_to_text,
+    load_wikipedia_titles_corpus,
+    parse_title_list,
+    parse_url_list,
+)
 from toy_llm.tokenizer import CharTokenizer
 
 
@@ -53,6 +59,18 @@ def test_parse_url_list_rejects_non_urls(tmp_path):
         parse_url_list(links)
 
 
+def test_parse_title_list_keeps_wikipedia_titles(tmp_path):
+    titles = tmp_path / "titles.txt"
+    titles.write_text(
+        "\n# comment\nArtificial intelligence\nTransformer (deep learning architecture)\n",
+        encoding="utf-8",
+    )
+    assert parse_title_list(titles) == [
+        "Artificial intelligence",
+        "Transformer (deep learning architecture)",
+    ]
+
+
 def test_html_to_text_skips_script_and_style_content():
     html = """
     <html>
@@ -69,3 +87,52 @@ def test_html_to_text_skips_script_and_style_content():
     assert "Readable article text." in text
     assert "alert" not in text
     assert "hidden" not in text
+
+
+class _FakePage:
+    def __init__(self, text: str, exists: bool = True):
+        self.text = text
+        self._exists = exists
+
+    def exists(self):
+        return self._exists
+
+
+class _FakeWiki:
+    def __init__(self, pages):
+        self.pages = pages
+
+    def page(self, title):
+        return self.pages[title]
+
+
+def test_load_wikipedia_titles_corpus_uses_page_text(tmp_path):
+    titles = tmp_path / "titles.txt"
+    titles.write_text("Artificial intelligence\nLanguage model\n", encoding="utf-8")
+    cache = tmp_path / "wiki_cache.txt"
+    wiki = _FakeWiki(
+        {
+            "Artificial intelligence": _FakePage("AI page text"),
+            "Language model": _FakePage("LM page text"),
+        }
+    )
+
+    corpus = load_wikipedia_titles_corpus(
+        titles,
+        language="en",
+        user_agent="test",
+        cache_path=cache,
+        wiki=wiki,
+    )
+
+    assert corpus == "AI page text\n\nLM page text"
+    assert cache.read_text(encoding="utf-8") == corpus
+
+
+def test_load_wikipedia_titles_corpus_rejects_missing_pages(tmp_path):
+    titles = tmp_path / "titles.txt"
+    titles.write_text("Missing page\n", encoding="utf-8")
+    wiki = _FakeWiki({"Missing page": _FakePage("", exists=False)})
+
+    with pytest.raises(ValueError, match="missing or empty"):
+        load_wikipedia_titles_corpus(titles, language="en", user_agent="test", wiki=wiki)

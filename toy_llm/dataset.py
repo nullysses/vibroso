@@ -42,6 +42,19 @@ def parse_url_list(path: str | Path) -> list[str]:
     return urls
 
 
+def parse_title_list(path: str | Path) -> list[str]:
+    text = load_text(path)
+    titles: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        titles.append(stripped)
+    if not titles:
+        raise ValueError(f"Title list contains no Wikipedia page titles: {path}")
+    return titles
+
+
 class _ReadableHTMLParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -122,6 +135,55 @@ def load_url_list_corpus(
     return corpus
 
 
+def _make_wikipedia_client(language: str, user_agent: str):
+    try:
+        import wikipediaapi
+    except ImportError as exc:
+        raise ImportError(
+            "Wikipedia title imports require the 'wikipedia-api' package. "
+            "Install it with: python -m pip install wikipedia-api"
+        ) from exc
+    return wikipediaapi.Wikipedia(language=language, user_agent=user_agent)
+
+
+def load_wikipedia_titles_corpus(
+    path: str | Path,
+    language: str,
+    user_agent: str,
+    cache_path: str | Path | None = None,
+    wiki=None,
+) -> str:
+    titles = parse_title_list(path)
+    wikipedia = wiki if wiki is not None else _make_wikipedia_client(language, user_agent)
+    documents: list[str] = []
+    missing_titles: list[str] = []
+    for i, title in enumerate(titles, start=1):
+        print(f"fetching Wikipedia page {i}/{len(titles)}: {title}")
+        page = wikipedia.page(title)
+        if hasattr(page, "exists") and not page.exists():
+            missing_titles.append(title)
+            continue
+        text = getattr(page, "text", "")
+        if text.strip():
+            documents.append(text)
+        else:
+            missing_titles.append(title)
+
+    if missing_titles:
+        missing = ", ".join(repr(title) for title in missing_titles)
+        raise ValueError(f"Wikipedia pages were missing or empty: {missing}")
+
+    corpus = "\n\n".join(documents)
+    if not corpus.strip():
+        raise ValueError("Fetched Wikipedia corpus is empty")
+    if cache_path is not None:
+        cache_file = Path(cache_path)
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(corpus, encoding="utf-8")
+        print(f"cached fetched corpus: {cache_file}")
+    return corpus
+
+
 def load_corpus(config: Config) -> str:
     if config.dataset_kind == "text":
         return load_text(config.dataset_path)
@@ -130,6 +192,13 @@ def load_corpus(config: Config) -> str:
         if cache_file.exists():
             print(f"loading cached corpus: {cache_file}")
             return load_text(cache_file)
+    if config.dataset_kind == "wikipedia_titles":
+        return load_wikipedia_titles_corpus(
+            config.dataset_path,
+            language=config.wikipedia_language,
+            user_agent=config.user_agent,
+            cache_path=config.corpus_cache_path,
+        )
     return load_url_list_corpus(
         config.dataset_path,
         timeout=config.fetch_timeout,

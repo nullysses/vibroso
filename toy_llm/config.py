@@ -34,6 +34,7 @@ class Config:
     corpus_cache_path: str | None = None
     fetch_timeout: float = 20.0
     user_agent: str = "toy-llm/0.1 academic corpus builder"
+    wikipedia_language: str = "en"
     checkpoint_dir: str = "checkpoints"
     seed: int = 1337
     device: str = "auto"
@@ -77,10 +78,12 @@ class Config:
         return asdict(self)
 
     def validate(self) -> None:
-        if self.dataset_kind not in {"text", "url_list"}:
-            raise ValueError("dataset_kind must be 'text' or 'url_list'")
+        if self.dataset_kind not in {"text", "url_list", "wikipedia_titles"}:
+            raise ValueError("dataset_kind must be 'text', 'url_list', or 'wikipedia_titles'")
         if self.fetch_timeout <= 0:
             raise ValueError("fetch_timeout must be > 0")
+        if not self.wikipedia_language:
+            raise ValueError("wikipedia_language must be non-empty")
         if self.batch_size <= 0:
             raise ValueError("batch_size must be > 0")
         if self.block_size <= 0:
