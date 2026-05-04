@@ -26,6 +26,7 @@ def main() -> None:
     parser.add_argument("--language", default="en", help="Wikipedia language code.")
     parser.add_argument("--tokenizer", choices=["subword", "char"], default="subword")
     parser.add_argument("--vocab-size", type=int, default=256)
+    parser.add_argument("--tokenizer-train-chars", type=int, default=10_000)
     args = parser.parse_args()
 
     dataset_kind = "text"
@@ -41,11 +42,18 @@ def main() -> None:
         wikipedia_language=args.language,
     )
     text = load_corpus(config)
-    tokenizer = build_tokenizer(text, kind=args.tokenizer, vocab_size=args.vocab_size)
+    tokenizer = build_tokenizer(
+        text,
+        kind=args.tokenizer,
+        vocab_size=args.vocab_size,
+        max_train_chars=args.tokenizer_train_chars,
+    )
     print(f"characters: {len(text)}")
     print(f"tokens: {len(tokenizer.encode(text))}")
     print(f"tokenizer: {args.tokenizer}")
     print(f"vocab_size: {tokenizer.vocab_size}")
+    if hasattr(tokenizer, "merge_count"):
+        print(f"subword merges: {tokenizer.merge_count}")
     print("vocabulary:")
     tokens = getattr(tokenizer, "tokens", getattr(tokenizer, "chars"))
     for idx, token in enumerate(tokens):

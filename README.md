@@ -30,6 +30,12 @@ Checkpoints are written to `checkpoints/latest.pt`.
 
 The default tokenizer is a small trainable subword tokenizer. It learns frequent adjacent character merges from the training corpus and stores the learned vocabulary in the checkpoint. Use `tokenizer_kind: char` in a config if you want the original character-level behavior.
 
+After tokenizer changes, retrain from scratch instead of resuming older subword checkpoints. Old subword tokenizer payloads are rejected so model weights are not reused with incompatible token IDs.
+
+For large corpora, `tokenizer_train_chars` controls how many leading corpus characters are used to learn subword merges. The base character vocabulary still covers the full corpus. The Wikipedia config starts with `tokenizer_vocab_size: 2048` and `tokenizer_train_chars: 10000`; increase the training window only after confirming startup time is acceptable.
+
+Wikipedia training has three startup phases before model steps begin: fetch/cache pages, build the tokenizer, then encode the cached corpus. The trainer prints `building tokenizer...` and `encoding dataset...` so you can tell which phase is running.
+
 To train from a list of URLs, put one URL per line in `data/my_links_corpus.txt` and run:
 
 ```bash
@@ -96,6 +102,12 @@ For Wikipedia page titles:
 
 ```bash
 python scripts/inspect_tokenizer.py --dataset data/my_wikipedia_pages.txt --wikipedia-titles --cache data/fetched_wikipedia_corpus.txt
+```
+
+To inspect the tokenizer stored in a checkpoint:
+
+```bash
+python scripts/inspect_checkpoint_tokenizer.py --checkpoint checkpoints/latest.pt --sample "A tortilla is a traditional Mexican flatbread."
 ```
 
 ## Tests

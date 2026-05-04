@@ -33,6 +33,7 @@ class Config:
     dataset_kind: str = "text"
     tokenizer_kind: str = "subword"
     tokenizer_vocab_size: int = 256
+    tokenizer_train_chars: int = 10_000
     corpus_cache_path: str | None = None
     fetch_timeout: float = 20.0
     user_agent: str = "toy-llm/0.1 academic corpus builder"
@@ -86,6 +87,8 @@ class Config:
             raise ValueError("tokenizer_kind must be 'subword' or 'char'")
         if self.tokenizer_vocab_size <= 0:
             raise ValueError("tokenizer_vocab_size must be > 0")
+        if self.tokenizer_train_chars <= 0:
+            raise ValueError("tokenizer_train_chars must be > 0")
         if self.fetch_timeout <= 0:
             raise ValueError("fetch_timeout must be > 0")
         if not self.wikipedia_language:

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from collections import Counter
+import re
+from collections import Counter, OrderedDict
 from typing import Protocol
+
+
+_CHUNK_RE = re.compile(r"\s+\S*|[^\s]+")
 
 
 class Tokenizer(Protocol):
@@ -89,19 +93,30 @@ class SubwordTokenizer:
         self.stoi = {token: i for i, token in enumerate(self.tokens)}
         self.itos = {i: token for i, token in enumerate(self.tokens)}
         self.base_chars = set(self.chars)
+        self._token_trie: dict = {}
+        for token in self.tokens:
+            node = self._token_trie
+            for ch in token:
+                node = node.setdefault(ch, {})
+            node[None] = token
+        self._piece_cache: OrderedDict[str, tuple[str, ...]] = OrderedDict()
+        self._piece_cache_limit = 50_000
+        self._max_chunk_chars = 256
 
     @classmethod
-    def from_text(cls, text: str, vocab_size: int = 256) -> "SubwordTokenizer":
+    def from_text(
+        cls,
+        text: str,
+        vocab_size: int = 256,
+        max_train_chars: int | None = 10_000,
+    ) -> "SubwordTokenizer":
         if not text:
             raise ValueError("Cannot build tokenizer from empty text")
         chars = sorted(set(text))
-        if vocab_size < len(chars):
-            raise ValueError(
-                f"tokenizer_vocab_size {vocab_size} is smaller than the base character "
-                f"vocabulary size {len(chars)}"
-            )
+        vocab_size = max(vocab_size, len(chars))
 
-        tokens = list(text)
+        train_text = text if max_train_chars is None else text[:max_train_chars]
+        tokens = list(train_text)
         merges: list[tuple[str, str]] = []
         known_tokens = set(chars)
         while len(known_tokens) < vocab_size:
@@ -130,25 +145,77 @@ class SubwordTokenizer:
     def vocab_size(self) -> int:
         return len(self.tokens)
 
-    def encode(self, text: str) -> list[int]:
+    @property
+    def merge_count(self) -> int:
+        return len(self.merges)
+
+    def _apply_merges_to_chunk(self, text: str) -> list[str]:
+        pieces = list(text)
+        for pair in self.merges:
+            merged = pair[0] + pair[1]
+            new_pieces: list[str] = []
+            i = 0
+            while i < len(pieces):
+                if i < len(pieces) - 1 and (pieces[i], pieces[i + 1]) == pair:
+                    new_pieces.append(merged)
+                    i += 2
+                else:
+                    new_pieces.append(pieces[i])
+                    i += 1
+            pieces = new_pieces
+        return pieces
+
+    def _encode_chunk_to_pieces(self, chunk: str) -> tuple[str, ...]:
+        cached = self._piece_cache.get(chunk)
+        if cached is not None:
+            self._piece_cache.move_to_end(chunk)
+            return cached
+
+        pieces = tuple(self._greedy_longest_pieces(chunk))
+        self._piece_cache[chunk] = pieces
+        if len(self._piece_cache) > self._piece_cache_limit:
+            self._piece_cache.popitem(last=False)
+        return pieces
+
+    def _greedy_longest_pieces(self, text: str) -> list[str]:
+        pieces: list[str] = []
+        i = 0
+        while i < len(text):
+            node = self._token_trie
+            j = i
+            best_piece: str | None = None
+            best_end = i
+            while j < len(text) and text[j] in node:
+                node = node[text[j]]
+                j += 1
+                if None in node:
+                    best_piece = node[None]
+                    best_end = j
+            if best_piece is None:
+                best_piece = text[i]
+                best_end = i + 1
+            pieces.append(best_piece)
+            i = best_end
+        return pieces
+
+    def _iter_chunks(self, text: str):
+        for match in _CHUNK_RE.finditer(text):
+            chunk = match.group(0)
+            for start in range(0, len(chunk), self._max_chunk_chars):
+                yield chunk[start : start + self._max_chunk_chars]
+
+    def encode_to_pieces(self, text: str) -> list[str]:
         missing = sorted({ch for ch in text if ch not in self.base_chars})
         if missing:
             raise ValueError(f"Characters are not in tokenizer vocabulary: {missing!r}")
 
-        tokens = list(text)
-        for pair in self.merges:
-            merged = pair[0] + pair[1]
-            new_tokens: list[str] = []
-            i = 0
-            while i < len(tokens):
-                if i < len(tokens) - 1 and (tokens[i], tokens[i + 1]) == pair:
-                    new_tokens.append(merged)
-                    i += 2
-                else:
-                    new_tokens.append(tokens[i])
-                    i += 1
-            tokens = new_tokens
-        return [self.stoi[token] for token in tokens]
+        pieces: list[str] = []
+        for chunk in self._iter_chunks(text):
+            pieces.extend(self._encode_chunk_to_pieces(chunk))
+        return pieces
+
+    def encode(self, text: str) -> list[int]:
+        return [self.stoi[piece] for piece in self.encode_to_pieces(text)]
 
     def decode(self, ids: list[int] | tuple[int, ...]) -> str:
         pieces: list[str] = []
@@ -163,6 +230,7 @@ class SubwordTokenizer:
     def to_dict(self) -> dict[str, object]:
         return {
             "kind": "subword",
+            "version": 2,
             "chars": self.chars,
             "merges": [list(pair) for pair in self.merges],
         }
@@ -176,17 +244,31 @@ class SubwordTokenizer:
         return cls(list(data["chars"]), merges)  # type: ignore[arg-type]
 
 
-def build_tokenizer(text: str, kind: str = "subword", vocab_size: int = 256) -> Tokenizer:
+def build_tokenizer(
+    text: str,
+    kind: str = "subword",
+    vocab_size: int = 256,
+    max_train_chars: int | None = 10_000,
+) -> Tokenizer:
     if kind == "char":
         return CharTokenizer.from_text(text)
     if kind == "subword":
-        return SubwordTokenizer.from_text(text, vocab_size=vocab_size)
+        return SubwordTokenizer.from_text(
+            text,
+            vocab_size=vocab_size,
+            max_train_chars=max_train_chars,
+        )
     raise ValueError("Tokenizer kind must be 'subword' or 'char'")
 
 
 def tokenizer_from_dict(data: dict[str, object]) -> Tokenizer:
     kind = data.get("kind")
     if kind == "subword":
+        if int(data.get("version", 1)) < 2:
+            raise ValueError(
+                "This subword tokenizer checkpoint is incompatible with the current "
+                "merge-aware tokenizer. Retrain from scratch to create a new checkpoint."
+            )
         return SubwordTokenizer.from_dict(data)
     if kind == "char" or kind is None:
         return CharTokenizer.from_dict(data)  # type: ignore[arg-type]

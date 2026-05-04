@@ -32,6 +32,7 @@ def test_subword_tokenizer_round_trips_and_learns_merges():
     assert tokenizer.decode(tokenizer.encode("abab")) == "abab"
     assert tokenizer.vocab_size > len(tokenizer.chars)
     assert len(tokenizer.encode("abab")) < 4
+    assert tokenizer.encode_to_pieces("abab") != list("abab")
 
 
 def test_subword_tokenizer_serializes_and_restores():
@@ -44,3 +45,42 @@ def test_subword_tokenizer_serializes_and_restores():
 def test_build_tokenizer_defaults_to_subword():
     tokenizer = build_tokenizer("abc abc abc", vocab_size=8)
     assert isinstance(tokenizer, SubwordTokenizer)
+
+
+def test_subword_tokenizer_expands_to_fit_base_characters():
+    tokenizer = SubwordTokenizer.from_text("abcd", vocab_size=2)
+    assert tokenizer.vocab_size == 4
+    assert tokenizer.decode(tokenizer.encode("abcd")) == "abcd"
+
+
+def test_subword_tokenizer_shortens_repeated_sentence():
+    sentence = "A tortilla is a traditional Mexican flatbread."
+    corpus = (sentence + "\n") * 20
+    tokenizer = SubwordTokenizer.from_text(corpus, vocab_size=80)
+    pieces = tokenizer.encode_to_pieces(sentence)
+    assert tokenizer.decode(tokenizer.encode(sentence)) == sentence
+    assert len(pieces) < len(sentence)
+    assert any(len(piece) > 1 for piece in pieces)
+
+
+def test_subword_training_window_still_keeps_full_base_vocabulary():
+    tokenizer = SubwordTokenizer.from_text("aaaa xyz", vocab_size=6, max_train_chars=4)
+    assert tokenizer.decode(tokenizer.encode("xyz")) == "xyz"
+
+
+def test_subword_encoder_caches_repeated_chunks():
+    tokenizer = SubwordTokenizer.from_text("hello world " * 20, vocab_size=30)
+    text = "hello world " * 10
+    ids = tokenizer.encode(text)
+    assert tokenizer.decode(ids) == text
+    assert len(tokenizer._piece_cache) < 5
+
+
+def test_old_subword_checkpoint_payload_is_rejected():
+    payload = {
+        "kind": "subword",
+        "chars": ["a", "b"],
+        "merges": [["a", "b"]],
+    }
+    with pytest.raises(ValueError, match="incompatible"):
+        tokenizer_from_dict(payload)

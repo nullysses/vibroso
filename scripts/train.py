@@ -45,11 +45,14 @@ def main() -> None:
 
     text = load_corpus(config)
     if not args.resume:
+        print("building tokenizer...")
         tokenizer = build_tokenizer(
             text,
             kind=config.tokenizer_kind,
             vocab_size=config.tokenizer_vocab_size,
+            max_train_chars=config.tokenizer_train_chars,
         )
+    print("encoding dataset...")
     dataset = TextDataset.from_text(
         text,
         tokenizer,
@@ -75,6 +78,8 @@ def main() -> None:
     print(f"dataset tokens: {len(tokenizer.encode(text))}")
     print(f"tokenizer: {config.tokenizer_kind}")
     print(f"vocab_size: {tokenizer.vocab_size}")
+    if hasattr(tokenizer, "merge_count"):
+        print(f"subword merges: {tokenizer.merge_count}")
     print(f"parameters: {count_parameters(model):,}")
 
     train(
