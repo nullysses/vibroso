@@ -3,5 +3,5 @@
 - [ ] LayerNorm → RMSNorm
 - [ ] plain MLP → SwiGLU MLP
 - [ ] standard attention → attention with KV cache for generation
-- [ ] single config → train/inference configs
+- [x] single config → train/inference configs
 - [ ] base LM only → instruction fine-tuning stage

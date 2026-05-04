@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from toy_llm.config import Config
+from toy_llm.config import TrainConfig
 from toy_llm.dataset import load_corpus
 from toy_llm.tokenizer import build_tokenizer
 
@@ -35,7 +35,7 @@ def main() -> None:
     if args.wikipedia_titles:
         dataset_kind = "wikipedia_titles"
 
-    config = Config(
+    config = TrainConfig(
         dataset_path=args.dataset,
         dataset_kind=dataset_kind,
         corpus_cache_path=args.cache,

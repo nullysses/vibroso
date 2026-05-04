@@ -1,10 +1,21 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+
+def _load_yaml(path: str | Path) -> dict[str, Any]:
+    config_path = Path(path)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+    with config_path.open("r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+    if not isinstance(raw, dict):
+        raise ValueError("Config YAML must contain a mapping at the top level")
+    return raw
 
 
 @dataclass
@@ -27,8 +38,20 @@ class ModelConfig:
             raise ValueError("model.dropout must be >= 0 and < 1")
 
 
+def _parse_model_config(data: dict[str, Any]) -> tuple[dict[str, Any], ModelConfig]:
+    values = dict(data)
+    model_data = values.pop("model", {})
+    if isinstance(model_data, ModelConfig):
+        model = model_data
+    elif isinstance(model_data, dict):
+        model = ModelConfig(**model_data)
+    else:
+        raise ValueError("model config must be a mapping")
+    return values, model
+
+
 @dataclass
-class Config:
+class TrainConfig:
     dataset_path: str = "data/input.txt"
     dataset_kind: str = "text"
     tokenizer_kind: str = "subword"
@@ -53,26 +76,12 @@ class Config:
     model: ModelConfig = field(default_factory=ModelConfig)
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "Config":
-        config_path = Path(path)
-        if not config_path.exists():
-            raise FileNotFoundError(f"Config file not found: {config_path}")
-        with config_path.open("r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f) or {}
-        if not isinstance(raw, dict):
-            raise ValueError("Config YAML must contain a mapping at the top level")
-        return cls.from_dict(raw)
+    def from_yaml(cls, path: str | Path) -> "TrainConfig":
+        return cls.from_dict(_load_yaml(path))
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Config":
-        values = dict(data)
-        model_data = values.pop("model", {})
-        if isinstance(model_data, ModelConfig):
-            model = model_data
-        elif isinstance(model_data, dict):
-            model = ModelConfig(**model_data)
-        else:
-            raise ValueError("model config must be a mapping")
+    def from_dict(cls, data: dict[str, Any]) -> "TrainConfig":
+        values, model = _parse_model_config(data)
         config = cls(**values, model=model)
         config.validate()
         return config
@@ -112,3 +121,51 @@ class Config:
         if self.checkpoint_interval <= 0:
             raise ValueError("checkpoint_interval must be > 0")
         self.model.validate()
+
+
+@dataclass
+class InferenceConfig:
+    checkpoint: str = "checkpoints/latest.pt"
+    prompt: str = ""
+    max_new_tokens: int = 300
+    temperature: float = 1.0
+    top_k: int | None = None
+    device: str = "auto"
+    seed: int | None = None
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> "InferenceConfig":
+        return cls.from_dict(_load_yaml(path))
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "InferenceConfig":
+        config = cls(**dict(data))
+        config.validate()
+        return config
+
+    def with_overrides(self, **overrides: Any) -> "InferenceConfig":
+        clean = {key: value for key, value in overrides.items() if value is not None}
+        config = replace(self, **clean)
+        config.validate()
+        return config
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def validate(self) -> None:
+        if not self.checkpoint:
+            raise ValueError("checkpoint must be non-empty")
+        if not self.prompt:
+            raise ValueError("prompt must be non-empty")
+        if self.max_new_tokens < 0:
+            raise ValueError("max_new_tokens must be >= 0")
+        if self.temperature <= 0:
+            raise ValueError("temperature must be > 0")
+        if self.top_k is not None and self.top_k <= 0:
+            raise ValueError("top_k must be > 0 when provided")
+        if not self.device:
+            raise ValueError("device must be non-empty")
+
+
+# Backward-compatible name for old imports/checkpoints. New code should use TrainConfig.
+Config = TrainConfig

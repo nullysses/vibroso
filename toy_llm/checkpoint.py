@@ -5,7 +5,7 @@ from typing import Any
 
 import torch
 
-from toy_llm.config import Config
+from toy_llm.config import TrainConfig
 from toy_llm.tokenizer import CharTokenizer
 
 
@@ -13,7 +13,7 @@ def save_checkpoint(
     path: str | Path,
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
-    config: Config,
+    config: TrainConfig,
     tokenizer: CharTokenizer,
     step: int,
     train_loss: float | None = None,

@@ -1,0 +1,7 @@
+checkpoint: checkpoints/latest.pt
+prompt: "hello"
+max_new_tokens: 300
+temperature: 1.0
+top_k:
+device: auto
+seed:

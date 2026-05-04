@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from toy_llm.checkpoint import load_checkpoint
-from toy_llm.config import Config
+from toy_llm.config import TrainConfig
 from toy_llm.dataset import TextDataset, load_corpus
 from toy_llm.device import get_device
 from toy_llm.model import TinyGPT
@@ -29,7 +29,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    config = Config.from_yaml(args.config)
+    config = TrainConfig.from_yaml(args.config)
     torch.manual_seed(config.seed)
     device = get_device(config.device)
 
@@ -37,7 +37,7 @@ def main() -> None:
     start_step = 0
     if args.resume:
         checkpoint = load_checkpoint(args.resume, device)
-        config = Config.from_dict(checkpoint["config"])
+        config = TrainConfig.from_dict(checkpoint["config"])
         device = get_device(config.device)
         tokenizer = tokenizer_from_dict(checkpoint["tokenizer"])
         start_step = int(checkpoint.get("step", 0))

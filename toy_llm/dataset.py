@@ -8,7 +8,7 @@ from urllib.request import Request, urlopen
 
 import torch
 
-from toy_llm.config import Config
+from toy_llm.config import TrainConfig
 from toy_llm.tokenizer import Tokenizer
 
 
@@ -184,7 +184,7 @@ def load_wikipedia_titles_corpus(
     return corpus
 
 
-def load_corpus(config: Config) -> str:
+def load_corpus(config: TrainConfig) -> str:
     if config.dataset_kind == "text":
         return load_text(config.dataset_path)
     if config.corpus_cache_path:
