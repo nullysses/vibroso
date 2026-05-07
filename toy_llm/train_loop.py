@@ -9,7 +9,7 @@ from toy_llm.config import TrainConfig
 from toy_llm.dataset import TextDataset
 from toy_llm.model import TinyGPT
 from toy_llm.sampling import make_optimizer
-from toy_llm.tokenizer import CharTokenizer
+from toy_llm.tokenizer import Tokenizer
 
 
 @torch.no_grad()
@@ -37,7 +37,7 @@ def estimate_loss(
 def train(
     model: TinyGPT,
     dataset: TextDataset,
-    tokenizer: CharTokenizer,
+    tokenizer: Tokenizer,
     config: TrainConfig,
     start_step: int = 0,
     optimizer_state_dict: dict | None = None,

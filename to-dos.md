@@ -1,4 +1,4 @@
-- [ ] custom subword tokenizer → robust byte-level BPE/SentencePiece
+- [x] custom subword tokenizer → robust byte-level BPE/SentencePiece
 - [ ] learned positional embeddings → RoPE
 - [ ] LayerNorm → RMSNorm
 - [ ] plain MLP → SwiGLU MLP

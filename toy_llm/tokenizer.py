@@ -73,33 +73,20 @@ class CharTokenizer:
 
 
 class SubwordTokenizer:
-    def __init__(self, chars: list[str], merges: list[tuple[str, str]]):
-        if not chars:
-            raise ValueError("Tokenizer vocabulary cannot be empty")
-        if len(set(chars)) != len(chars):
-            raise ValueError("Tokenizer vocabulary contains duplicate base characters")
-        self.chars = list(chars)
+    def __init__(self, merges: list[tuple[int, int]]):
         self.merges = list(merges)
         self.merge_ranks = {pair: rank for rank, pair in enumerate(self.merges)}
 
-        vocab = list(self.chars)
-        seen = set(vocab)
+        token_bytes = {idx: bytes([idx]) for idx in range(256)}
         for left, right in self.merges:
-            token = left + right
-            if token not in seen:
-                vocab.append(token)
-                seen.add(token)
-        self.tokens = vocab
-        self.stoi = {token: i for i, token in enumerate(self.tokens)}
-        self.itos = {i: token for i, token in enumerate(self.tokens)}
-        self.base_chars = set(self.chars)
-        self._token_trie: dict = {}
-        for token in self.tokens:
-            node = self._token_trie
-            for ch in token:
-                node = node.setdefault(ch, {})
-            node[None] = token
-        self._piece_cache: OrderedDict[str, tuple[str, ...]] = OrderedDict()
+            if left not in token_bytes or right not in token_bytes:
+                raise ValueError("Tokenizer merge references an unknown token id")
+            token_bytes[len(token_bytes)] = token_bytes[left] + token_bytes[right]
+
+        self.itos = token_bytes
+        self.tokens = [self._display_token(self.itos[idx]) for idx in range(len(self.itos))]
+        self.chars = self.tokens[:256]
+        self._piece_cache: OrderedDict[bytes, tuple[int, ...]] = OrderedDict()
         self._piece_cache_limit = 50_000
         self._max_chunk_chars = 256
 
@@ -112,34 +99,26 @@ class SubwordTokenizer:
     ) -> "SubwordTokenizer":
         if not text:
             raise ValueError("Cannot build tokenizer from empty text")
-        chars = sorted(set(text))
-        vocab_size = max(vocab_size, len(chars))
+        vocab_size = max(vocab_size, 256)
 
         train_text = text if max_train_chars is None else text[:max_train_chars]
-        tokens = list(train_text)
-        merges: list[tuple[str, str]] = []
-        known_tokens = set(chars)
-        while len(known_tokens) < vocab_size:
-            pair_counts = Counter(zip(tokens, tokens[1:]))
+        chunks = [list(chunk.encode("utf-8")) for chunk in cls._iter_text_chunks(train_text)]
+        merges: list[tuple[int, int]] = []
+        token_bytes = {idx: bytes([idx]) for idx in range(256)}
+        while len(token_bytes) < vocab_size:
+            pair_counts: Counter[tuple[int, int]] = Counter()
+            for chunk in chunks:
+                pair_counts.update(zip(chunk, chunk[1:]))
             if not pair_counts:
                 break
-            pair, count = pair_counts.most_common(1)[0]
+            pair, count = max(pair_counts.items(), key=lambda item: (item[1], -item[0][0], -item[0][1]))
             if count < 2:
                 break
-            merged = pair[0] + pair[1]
-            new_tokens: list[str] = []
-            i = 0
-            while i < len(tokens):
-                if i < len(tokens) - 1 and (tokens[i], tokens[i + 1]) == pair:
-                    new_tokens.append(merged)
-                    i += 2
-                else:
-                    new_tokens.append(tokens[i])
-                    i += 1
-            tokens = new_tokens
+            new_token = len(token_bytes)
+            token_bytes[new_token] = token_bytes[pair[0]] + token_bytes[pair[1]]
+            chunks = [cls._replace_pair(chunk, pair, new_token) for chunk in chunks]
             merges.append(pair)
-            known_tokens.add(merged)
-        return cls(chars, merges)
+        return cls(merges)
 
     @property
     def vocab_size(self) -> int:
@@ -149,99 +128,90 @@ class SubwordTokenizer:
     def merge_count(self) -> int:
         return len(self.merges)
 
-    def _apply_merges_to_chunk(self, text: str) -> list[str]:
-        pieces = list(text)
-        for pair in self.merges:
-            merged = pair[0] + pair[1]
-            new_pieces: list[str] = []
-            i = 0
-            while i < len(pieces):
-                if i < len(pieces) - 1 and (pieces[i], pieces[i + 1]) == pair:
-                    new_pieces.append(merged)
-                    i += 2
-                else:
-                    new_pieces.append(pieces[i])
-                    i += 1
-            pieces = new_pieces
-        return pieces
+    @staticmethod
+    def _display_token(data: bytes) -> str:
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            return data.hex(" ")
 
-    def _encode_chunk_to_pieces(self, chunk: str) -> tuple[str, ...]:
+    @staticmethod
+    def _replace_pair(tokens: list[int], pair: tuple[int, int], new_token: int) -> list[int]:
+        new_tokens: list[int] = []
+        i = 0
+        while i < len(tokens):
+            if i < len(tokens) - 1 and (tokens[i], tokens[i + 1]) == pair:
+                new_tokens.append(new_token)
+                i += 2
+            else:
+                new_tokens.append(tokens[i])
+                i += 1
+        return new_tokens
+
+    @staticmethod
+    def _iter_text_chunks(text: str):
+        for match in _CHUNK_RE.finditer(text):
+            yield match.group(0)
+
+    def _encode_chunk_to_ids(self, chunk: bytes) -> tuple[int, ...]:
         cached = self._piece_cache.get(chunk)
         if cached is not None:
             self._piece_cache.move_to_end(chunk)
             return cached
 
-        pieces = tuple(self._greedy_longest_pieces(chunk))
-        self._piece_cache[chunk] = pieces
+        ids = list(chunk)
+        for rank, pair in enumerate(self.merges):
+            new_token = 256 + rank
+            ids = self._replace_pair(ids, pair, new_token)
+        encoded = tuple(ids)
+        self._piece_cache[chunk] = encoded
         if len(self._piece_cache) > self._piece_cache_limit:
             self._piece_cache.popitem(last=False)
-        return pieces
-
-    def _greedy_longest_pieces(self, text: str) -> list[str]:
-        pieces: list[str] = []
-        i = 0
-        while i < len(text):
-            node = self._token_trie
-            j = i
-            best_piece: str | None = None
-            best_end = i
-            while j < len(text) and text[j] in node:
-                node = node[text[j]]
-                j += 1
-                if None in node:
-                    best_piece = node[None]
-                    best_end = j
-            if best_piece is None:
-                best_piece = text[i]
-                best_end = i + 1
-            pieces.append(best_piece)
-            i = best_end
-        return pieces
+        return encoded
 
     def _iter_chunks(self, text: str):
-        for match in _CHUNK_RE.finditer(text):
-            chunk = match.group(0)
+        for chunk in self._iter_text_chunks(text):
             for start in range(0, len(chunk), self._max_chunk_chars):
-                yield chunk[start : start + self._max_chunk_chars]
+                yield chunk[start : start + self._max_chunk_chars].encode("utf-8")
 
     def encode_to_pieces(self, text: str) -> list[str]:
-        missing = sorted({ch for ch in text if ch not in self.base_chars})
-        if missing:
-            raise ValueError(f"Characters are not in tokenizer vocabulary: {missing!r}")
-
         pieces: list[str] = []
         for chunk in self._iter_chunks(text):
-            pieces.extend(self._encode_chunk_to_pieces(chunk))
+            pieces.extend(self._display_token(self.itos[token_id]) for token_id in self._encode_chunk_to_ids(chunk))
         return pieces
 
     def encode(self, text: str) -> list[int]:
-        return [self.stoi[piece] for piece in self.encode_to_pieces(text)]
+        ids: list[int] = []
+        for chunk in self._iter_chunks(text):
+            ids.extend(self._encode_chunk_to_ids(chunk))
+        return ids
 
     def decode(self, ids: list[int] | tuple[int, ...]) -> str:
-        pieces: list[str] = []
+        pieces: list[bytes] = []
         for token_id in ids:
             idx = int(token_id)
             try:
                 pieces.append(self.itos[idx])
             except KeyError as exc:
                 raise ValueError(f"Token id {idx} is not in tokenizer vocabulary") from exc
-        return "".join(pieces)
+        try:
+            return b"".join(pieces).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("Token ids do not decode to valid UTF-8") from exc
 
     def to_dict(self) -> dict[str, object]:
         return {
             "kind": "subword",
-            "version": 2,
-            "chars": self.chars,
+            "algorithm": "byte_bpe",
+            "version": 3,
             "merges": [list(pair) for pair in self.merges],
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> "SubwordTokenizer":
-        if "chars" not in data:
-            raise ValueError("Tokenizer data must contain 'chars'")
         raw_merges = data.get("merges", [])
-        merges = [(str(left), str(right)) for left, right in raw_merges]  # type: ignore[misc]
-        return cls(list(data["chars"]), merges)  # type: ignore[arg-type]
+        merges = [(int(left), int(right)) for left, right in raw_merges]  # type: ignore[misc]
+        return cls(merges)
 
 
 def build_tokenizer(
@@ -264,10 +234,10 @@ def build_tokenizer(
 def tokenizer_from_dict(data: dict[str, object]) -> Tokenizer:
     kind = data.get("kind")
     if kind == "subword":
-        if int(data.get("version", 1)) < 2:
+        if data.get("algorithm") != "byte_bpe" or int(data.get("version", 1)) < 3:
             raise ValueError(
                 "This subword tokenizer checkpoint is incompatible with the current "
-                "merge-aware tokenizer. Retrain from scratch to create a new checkpoint."
+                "byte-level BPE tokenizer. Retrain from scratch to create a new checkpoint."
             )
         return SubwordTokenizer.from_dict(data)
     if kind == "char" or kind is None:
