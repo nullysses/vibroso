@@ -7,19 +7,39 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def _rotate_half(x: torch.Tensor) -> torch.Tensor:
+    x_even = x[..., 0::2]
+    x_odd = x[..., 1::2]
+    return torch.stack((-x_odd, x_even), dim=-1).flatten(-2)
+
+
+def apply_rope(x: torch.Tensor, inv_freq: torch.Tensor) -> torch.Tensor:
+    _, t, head_size = x.shape
+    positions = torch.arange(t, device=x.device, dtype=inv_freq.dtype)
+    freqs = torch.outer(positions, inv_freq)
+    angles = torch.repeat_interleave(freqs, repeats=2, dim=-1)
+    cos = angles.cos().to(dtype=x.dtype).unsqueeze(0)
+    sin = angles.sin().to(dtype=x.dtype).unsqueeze(0)
+    return (x * cos) + (_rotate_half(x) * sin)
+
+
 class CausalSelfAttentionHead(nn.Module):
     def __init__(self, n_embd: int, head_size: int, block_size: int, dropout: float):
         super().__init__()
+        if head_size % 2 != 0:
+            raise ValueError("RoPE requires each attention head size to be even")
         self.key = nn.Linear(n_embd, head_size, bias=False)
         self.query = nn.Linear(n_embd, head_size, bias=False)
         self.value = nn.Linear(n_embd, head_size, bias=False)
         self.dropout = nn.Dropout(dropout)
         self.register_buffer("tril", torch.tril(torch.ones(block_size, block_size)))
+        inv_freq = 1.0 / (10_000 ** (torch.arange(0, head_size, 2).float() / head_size))
+        self.register_buffer("rope_inv_freq", inv_freq, persistent=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         _, t, _ = x.shape
-        k = self.key(x)
-        q = self.query(x)
+        k = apply_rope(self.key(x), self.rope_inv_freq)
+        q = apply_rope(self.query(x), self.rope_inv_freq)
         weights = q @ k.transpose(-2, -1) / math.sqrt(k.shape[-1])
         weights = weights.masked_fill(self.tril[:t, :t] == 0, float("-inf"))
         weights = F.softmax(weights, dim=-1)
@@ -84,10 +104,11 @@ class TinyGPT(nn.Module):
         super().__init__()
         if n_embd % n_head != 0:
             raise ValueError("n_embd must be divisible by n_head")
+        if (n_embd // n_head) % 2 != 0:
+            raise ValueError("RoPE requires n_embd / n_head to be even")
         self.vocab_size = vocab_size
         self.block_size = block_size
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-        self.position_embedding_table = nn.Embedding(block_size, n_embd)
         self.blocks = nn.Sequential(
             *[Block(n_embd, n_head, block_size, dropout) for _ in range(n_layer)]
         )
@@ -111,10 +132,7 @@ class TinyGPT(nn.Module):
         _, t = idx.shape
         if t > self.block_size:
             raise ValueError(f"Sequence length {t} exceeds block_size {self.block_size}")
-        tok_emb = self.token_embedding_table(idx)
-        pos = torch.arange(0, t, device=idx.device)
-        pos_emb = self.position_embedding_table(pos)
-        x = tok_emb + pos_emb
+        x = self.token_embedding_table(idx)
         x = self.blocks(x)
         x = self.ln_f(x)
         logits = self.lm_head(x)

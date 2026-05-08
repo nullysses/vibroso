@@ -1,5 +1,5 @@
 - [x] custom subword tokenizer → robust byte-level BPE/SentencePiece
-- [ ] learned positional embeddings → RoPE
+- [x] learned positional embeddings → RoPE
 - [ ] LayerNorm → RMSNorm
 - [ ] plain MLP → SwiGLU MLP
 - [ ] standard attention → attention with KV cache for generation

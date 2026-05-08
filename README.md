@@ -1,6 +1,6 @@
 # Vibroso
 
-A small academic GPT-style language model built with Python and PyTorch. It implements the core pieces of a local language model: tokenization, dataset batching, causal self-attention, Transformer blocks, training, checkpointing, and sampling.
+A small academic GPT-style language model built with Python and PyTorch. It implements the core pieces of a local language model: tokenization, dataset batching, causal self-attention with RoPE, Transformer blocks, training, checkpointing, and sampling.
 
 ## What this is
 

@@ -34,6 +34,8 @@ class ModelConfig:
             raise ValueError("model.n_layer must be > 0")
         if self.n_embd % self.n_head != 0:
             raise ValueError("model.n_embd must be divisible by model.n_head")
+        if (self.n_embd // self.n_head) % 2 != 0:
+            raise ValueError("model.n_embd / model.n_head must be even for RoPE")
         if not 0 <= self.dropout < 1:
             raise ValueError("model.dropout must be >= 0 and < 1")
 
