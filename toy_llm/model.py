@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import math
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+KVCache = dict[str, torch.Tensor]
 
 
 def _rotate_half(x: torch.Tensor) -> torch.Tensor:
@@ -21,10 +21,18 @@ def build_rope_cache(block_size: int, head_size: int) -> tuple[torch.Tensor, tor
     return angles.cos().unsqueeze(0), angles.sin().unsqueeze(0)
 
 
-def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-    t = x.shape[1]
-    cos = cos[:, :t, :].to(dtype=x.dtype)
-    sin = sin[:, :t, :].to(dtype=x.dtype)
+def apply_rope(
+    x: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    position_offset: int = 0,
+) -> torch.Tensor:
+    t = x.shape[-2]
+    cos = cos[:, position_offset : position_offset + t, :].to(dtype=x.dtype)
+    sin = sin[:, position_offset : position_offset + t, :].to(dtype=x.dtype)
+    if x.ndim == 4:
+        cos = cos.unsqueeze(1)
+        sin = sin.unsqueeze(1)
     return (x * cos) + (_rotate_half(x) * sin)
 
 
@@ -39,45 +47,85 @@ class RMSNorm(nn.Module):
         return self.weight * x * rms
 
 
-class CausalSelfAttentionHead(nn.Module):
-    def __init__(self, n_embd: int, head_size: int, block_size: int, dropout: float):
+class CausalSelfAttention(nn.Module):
+    def __init__(self, n_embd: int, n_head: int, block_size: int, dropout: float):
         super().__init__()
+        if n_embd % n_head != 0:
+            raise ValueError("n_embd must be divisible by n_head")
+        head_size = n_embd // n_head
         if head_size % 2 != 0:
             raise ValueError("RoPE requires each attention head size to be even")
-        self.key = nn.Linear(n_embd, head_size, bias=False)
-        self.query = nn.Linear(n_embd, head_size, bias=False)
-        self.value = nn.Linear(n_embd, head_size, bias=False)
-        self.dropout = nn.Dropout(dropout)
-        self.register_buffer("tril", torch.tril(torch.ones(block_size, block_size)))
+        self.n_embd = n_embd
+        self.n_head = n_head
+        self.head_size = head_size
+        self.block_size = block_size
+        self.dropout = dropout
+        self.qkv = nn.Linear(n_embd, 3 * n_embd, bias=False)
+        self.proj = nn.Linear(n_embd, n_embd, bias=False)
+        self.resid_dropout = nn.Dropout(dropout)
         rope_cos, rope_sin = build_rope_cache(block_size, head_size)
         self.register_buffer("rope_cos", rope_cos, persistent=False)
         self.register_buffer("rope_sin", rope_sin, persistent=False)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        _, t, _ = x.shape
-        k = apply_rope(self.key(x), self.rope_cos, self.rope_sin)
-        q = apply_rope(self.query(x), self.rope_cos, self.rope_sin)
-        weights = q @ k.transpose(-2, -1) / math.sqrt(k.shape[-1])
-        weights = weights.masked_fill(self.tril[:t, :t] == 0, float("-inf"))
-        weights = F.softmax(weights, dim=-1)
-        weights = self.dropout(weights)
-        v = self.value(x)
-        return weights @ v
+    def _attention(
+        self,
+        x: torch.Tensor,
+        kv_cache: KVCache | None = None,
+        use_cache: bool = False,
+    ) -> tuple[torch.Tensor, KVCache | None]:
+        b, t, c = x.shape
+        if t > self.block_size:
+            raise ValueError(f"Sequence length {t} exceeds block_size {self.block_size}")
 
+        cache_len = 0
+        if kv_cache is not None:
+            cache_len = int(kv_cache["k"].shape[2])
+            keep = max(self.block_size - t, 0)
+            if cache_len > keep:
+                kv_cache = {
+                    "k": kv_cache["k"][:, :, -keep:, :] if keep else kv_cache["k"][:, :, :0, :],
+                    "v": kv_cache["v"][:, :, -keep:, :] if keep else kv_cache["v"][:, :, :0, :],
+                }
+                cache_len = int(kv_cache["k"].shape[2])
 
-class MultiHeadAttention(nn.Module):
-    def __init__(self, n_embd: int, n_head: int, block_size: int, dropout: float):
-        super().__init__()
-        head_size = n_embd // n_head
-        self.heads = nn.ModuleList(
-            [CausalSelfAttentionHead(n_embd, head_size, block_size, dropout) for _ in range(n_head)]
+        q, k, v = self.qkv(x).split(c, dim=2)
+        q = q.view(b, t, self.n_head, self.head_size).transpose(1, 2)
+        k = k.view(b, t, self.n_head, self.head_size).transpose(1, 2)
+        v = v.view(b, t, self.n_head, self.head_size).transpose(1, 2)
+
+        q = apply_rope(q, self.rope_cos, self.rope_sin, position_offset=cache_len)
+        k = apply_rope(k, self.rope_cos, self.rope_sin, position_offset=cache_len)
+
+        if kv_cache is not None:
+            k = torch.cat((kv_cache["k"], k), dim=2)
+            v = torch.cat((kv_cache["v"], v), dim=2)
+            if k.shape[2] > self.block_size:
+                k = k[:, :, -self.block_size :, :]
+                v = v[:, :, -self.block_size :, :]
+        new_cache = {"k": k, "v": v} if use_cache else None
+
+        y = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            dropout_p=self.dropout if self.training else 0.0,
+            is_causal=kv_cache is None,
         )
-        self.proj = nn.Linear(n_embd, n_embd)
-        self.dropout = nn.Dropout(dropout)
+        y = y.transpose(1, 2).contiguous().view(b, t, c)
+        return self.resid_dropout(self.proj(y)), new_cache
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = torch.cat([head(x) for head in self.heads], dim=-1)
-        return self.dropout(self.proj(out))
+        out, _ = self._attention(x)
+        return out
+
+    def forward_with_cache(
+        self,
+        x: torch.Tensor,
+        kv_cache: KVCache | None,
+    ) -> tuple[torch.Tensor, KVCache]:
+        out, new_cache = self._attention(x, kv_cache=kv_cache, use_cache=True)
+        assert new_cache is not None
+        return out, new_cache
 
 
 class FeedForward(nn.Module):
@@ -97,7 +145,7 @@ class FeedForward(nn.Module):
 class Block(nn.Module):
     def __init__(self, n_embd: int, n_head: int, block_size: int, dropout: float):
         super().__init__()
-        self.sa = MultiHeadAttention(n_embd, n_head, block_size, dropout)
+        self.sa = CausalSelfAttention(n_embd, n_head, block_size, dropout)
         self.ffwd = FeedForward(n_embd, dropout)
         self.ln1 = RMSNorm(n_embd)
         self.ln2 = RMSNorm(n_embd)
@@ -106,6 +154,16 @@ class Block(nn.Module):
         x = x + self.sa(self.ln1(x))
         x = x + self.ffwd(self.ln2(x))
         return x
+
+    def forward_with_cache(
+        self,
+        x: torch.Tensor,
+        kv_cache: KVCache | None,
+    ) -> tuple[torch.Tensor, KVCache]:
+        attn_out, new_cache = self.sa.forward_with_cache(self.ln1(x), kv_cache)
+        x = x + attn_out
+        x = x + self.ffwd(self.ln2(x))
+        return x, new_cache
 
 
 class TinyGPT(nn.Module):
@@ -126,8 +184,8 @@ class TinyGPT(nn.Module):
         self.vocab_size = vocab_size
         self.block_size = block_size
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-        self.blocks = nn.Sequential(
-            *[Block(n_embd, n_head, block_size, dropout) for _ in range(n_layer)]
+        self.blocks = nn.ModuleList(
+            [Block(n_embd, n_head, block_size, dropout) for _ in range(n_layer)]
         )
         self.ln_f = RMSNorm(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size)
@@ -150,7 +208,8 @@ class TinyGPT(nn.Module):
         if t > self.block_size:
             raise ValueError(f"Sequence length {t} exceeds block_size {self.block_size}")
         x = self.token_embedding_table(idx)
-        x = self.blocks(x)
+        for block in self.blocks:
+            x = block(x)
         x = self.ln_f(x)
         logits = self.lm_head(x)
 
@@ -160,6 +219,27 @@ class TinyGPT(nn.Module):
             loss = F.cross_entropy(logits.view(b * t, c), targets.view(b * t))
         return logits, loss
 
+    def forward_with_cache(
+        self,
+        idx: torch.Tensor,
+        kv_caches: list[KVCache | None] | None = None,
+    ) -> tuple[torch.Tensor, list[KVCache]]:
+        _, t = idx.shape
+        if t > self.block_size:
+            raise ValueError(f"Sequence length {t} exceeds block_size {self.block_size}")
+        if kv_caches is None:
+            kv_caches = [None] * len(self.blocks)
+        if len(kv_caches) != len(self.blocks):
+            raise ValueError("kv_caches length must match number of transformer blocks")
+
+        x = self.token_embedding_table(idx)
+        new_caches: list[KVCache] = []
+        for block, kv_cache in zip(self.blocks, kv_caches):
+            x, new_cache = block.forward_with_cache(x, kv_cache)
+            new_caches.append(new_cache)
+        x = self.ln_f(x)
+        return self.lm_head(x), new_caches
+
     @torch.no_grad()
     def generate(
         self,
@@ -167,6 +247,7 @@ class TinyGPT(nn.Module):
         max_new_tokens: int,
         temperature: float = 1.0,
         top_k: int | None = None,
+        use_kv_cache: bool = True,
     ) -> torch.Tensor:
         if max_new_tokens < 0:
             raise ValueError("max_new_tokens must be >= 0")
@@ -174,9 +255,14 @@ class TinyGPT(nn.Module):
             raise ValueError("temperature must be > 0")
         if top_k is not None and top_k <= 0:
             raise ValueError("top_k must be > 0 when provided")
+        kv_caches: list[KVCache | None] | None = None
         for _ in range(max_new_tokens):
-            idx_cond = idx[:, -self.block_size :]
-            logits, _ = self(idx_cond)
+            if use_kv_cache:
+                idx_cond = idx[:, -self.block_size :] if kv_caches is None else idx[:, -1:]
+                logits, kv_caches = self.forward_with_cache(idx_cond, kv_caches)
+            else:
+                idx_cond = idx[:, -self.block_size :]
+                logits, _ = self(idx_cond)
             logits = logits[:, -1, :] / temperature
             if top_k is not None:
                 k = min(top_k, logits.size(-1))

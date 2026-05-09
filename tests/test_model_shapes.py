@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import pytest
 
-from toy_llm.model import CausalSelfAttentionHead, RMSNorm, TinyGPT, apply_rope, build_rope_cache
+from toy_llm.model import CausalSelfAttention, RMSNorm, TinyGPT, apply_rope, build_rope_cache
 
 
 def make_model() -> TinyGPT:
@@ -40,14 +40,11 @@ def test_forward_rejects_sequence_longer_than_block_size():
 
 
 def test_attention_mask_shape_and_future_positions():
-    head = CausalSelfAttentionHead(n_embd=16, head_size=4, block_size=8, dropout=0.0)
-    assert head.tril.shape == (8, 8)
-    assert head.rope_cos.shape == (1, 8, 4)
-    assert head.rope_sin.shape == (1, 8, 4)
-    assert head.tril[0, 1] == 0
-    assert head.tril[7, 0] == 1
-    out = head(torch.randn(2, 6, 16))
-    assert out.shape == (2, 6, 4)
+    attention = CausalSelfAttention(n_embd=16, n_head=4, block_size=8, dropout=0.0)
+    assert attention.rope_cos.shape == (1, 8, 4)
+    assert attention.rope_sin.shape == (1, 8, 4)
+    out = attention(torch.randn(2, 6, 16))
+    assert out.shape == (2, 6, 16)
 
 
 def test_model_uses_rope_instead_of_learned_position_embeddings():
@@ -59,7 +56,7 @@ def test_model_uses_rope_instead_of_learned_position_embeddings():
 
 def test_rope_rejects_odd_attention_head_size():
     with pytest.raises(ValueError, match="head size to be even"):
-        CausalSelfAttentionHead(n_embd=15, head_size=3, block_size=8, dropout=0.0)
+        CausalSelfAttention(n_embd=15, n_head=5, block_size=8, dropout=0.0)
 
     with pytest.raises(ValueError, match="n_embd / n_head to be even"):
         TinyGPT(
@@ -78,6 +75,23 @@ def test_rope_preserves_shape_and_first_position():
     rotated = apply_rope(x, cos, sin)
     assert rotated.shape == x.shape
     assert torch.allclose(rotated[:, 0, :], x[:, 0, :])
+
+
+def test_rope_supports_batched_head_layout():
+    x = torch.randn(2, 3, 4, 6)
+    cos, sin = build_rope_cache(block_size=4, head_size=6)
+    rotated = apply_rope(x, cos, sin)
+    assert rotated.shape == x.shape
+    assert torch.allclose(rotated[:, :, 0, :], x[:, :, 0, :])
+
+
+def test_forward_with_cache_returns_one_cache_per_block():
+    model = make_model()
+    logits, caches = model.forward_with_cache(torch.randint(0, 11, (2, 5)))
+    assert logits.shape == (2, 5, 11)
+    assert len(caches) == 2
+    assert caches[0]["k"].shape == (2, 4, 5, 4)
+    assert caches[0]["v"].shape == (2, 4, 5, 4)
 
 
 def test_rms_norm_matches_definition():

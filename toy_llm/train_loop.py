@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import torch
@@ -14,6 +15,11 @@ from toy_llm.tokenizer import Tokenizer
 
 def use_mixed_precision(device: torch.device) -> bool:
     return device.type == "cuda"
+
+
+def _sync_if_cuda(device: torch.device) -> None:
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
 
 
 @torch.no_grad()
@@ -88,6 +94,8 @@ def train(
         if step == config.max_steps:
             break
 
+        _sync_if_cuda(dataset.device)
+        step_start = time.perf_counter()
         xb, yb = dataset.get_batch("train")
         with torch.autocast(
             device_type=dataset.device.type,
@@ -100,6 +108,9 @@ def train(
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
+        _sync_if_cuda(dataset.device)
+        elapsed_ms = (time.perf_counter() - step_start) * 1000
+        print(f"step {step + 1}: train step elapsed {elapsed_ms:.2f} ms")
 
     save_checkpoint(
         checkpoint_dir / "latest.pt",
