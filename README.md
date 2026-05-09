@@ -36,6 +36,8 @@ For large corpora, `tokenizer_train_chars` controls how many leading corpus char
 
 Wikipedia training has three startup phases before model steps begin: fetch/cache pages, build the tokenizer, then encode the cached corpus. The trainer prints `building tokenizer...` and `encoding dataset...` so you can tell which phase is running.
 
+On CUDA devices, training uses bf16 mixed precision with PyTorch autocast and GradScaler. CPU and MPS training leave autocast disabled.
+
 To train from a list of URLs, put one URL per line in `data/my_links_corpus.txt` and run:
 
 ```bash

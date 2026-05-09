@@ -12,6 +12,10 @@ from toy_llm.sampling import make_optimizer
 from toy_llm.tokenizer import Tokenizer
 
 
+def use_mixed_precision(device: torch.device) -> bool:
+    return device.type == "cuda"
+
+
 @torch.no_grad()
 def estimate_loss(
     model: TinyGPT,
@@ -25,7 +29,12 @@ def estimate_loss(
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
             xb, yb = dataset.get_batch(split)
-            _, loss = model(xb, yb)
+            with torch.autocast(
+                device_type=dataset.device.type,
+                dtype=torch.bfloat16,
+                enabled=use_mixed_precision(dataset.device),
+            ):
+                _, loss = model(xb, yb)
             assert loss is not None
             losses[k] = loss.item()
         out[split] = losses.mean().item()
@@ -46,6 +55,8 @@ def train(
     if optimizer_state_dict is not None:
         optimizer.load_state_dict(optimizer_state_dict)
 
+    use_amp = use_mixed_precision(dataset.device)
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     model.train()
     latest_losses: dict[str, float | None] = {"train": None, "val": None}
     checkpoint_dir = Path(config.checkpoint_dir)
@@ -78,11 +89,17 @@ def train(
             break
 
         xb, yb = dataset.get_batch("train")
-        _, loss = model(xb, yb)
+        with torch.autocast(
+            device_type=dataset.device.type,
+            dtype=torch.bfloat16,
+            enabled=use_amp,
+        ):
+            _, loss = model(xb, yb)
         assert loss is not None
         optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
     save_checkpoint(
         checkpoint_dir / "latest.pt",
