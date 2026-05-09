@@ -1,7 +1,8 @@
 import torch
+import torch.nn as nn
 import pytest
 
-from toy_llm.model import CausalSelfAttentionHead, TinyGPT, apply_rope
+from toy_llm.model import CausalSelfAttentionHead, RMSNorm, TinyGPT, apply_rope, build_rope_cache
 
 
 def make_model() -> TinyGPT:
@@ -41,7 +42,8 @@ def test_forward_rejects_sequence_longer_than_block_size():
 def test_attention_mask_shape_and_future_positions():
     head = CausalSelfAttentionHead(n_embd=16, head_size=4, block_size=8, dropout=0.0)
     assert head.tril.shape == (8, 8)
-    assert head.rope_inv_freq.shape == (2,)
+    assert head.rope_cos.shape == (1, 8, 4)
+    assert head.rope_sin.shape == (1, 8, 4)
     assert head.tril[0, 1] == 0
     assert head.tril[7, 0] == 1
     out = head(torch.randn(2, 6, 16))
@@ -52,7 +54,7 @@ def test_model_uses_rope_instead_of_learned_position_embeddings():
     model = make_model()
     assert not hasattr(model, "position_embedding_table")
     assert all("position_embedding_table" not in name for name, _ in model.named_parameters())
-    assert any("rope_inv_freq" in name for name, _ in model.named_buffers())
+    assert any("rope_cos" in name for name, _ in model.named_buffers())
 
 
 def test_rope_rejects_odd_attention_head_size():
@@ -72,7 +74,20 @@ def test_rope_rejects_odd_attention_head_size():
 
 def test_rope_preserves_shape_and_first_position():
     x = torch.randn(2, 4, 6)
-    inv_freq = torch.ones(3)
-    rotated = apply_rope(x, inv_freq)
+    cos, sin = build_rope_cache(block_size=4, head_size=6)
+    rotated = apply_rope(x, cos, sin)
     assert rotated.shape == x.shape
     assert torch.allclose(rotated[:, 0, :], x[:, 0, :])
+
+
+def test_rms_norm_matches_definition():
+    norm = RMSNorm(4, eps=0.0)
+    x = torch.tensor([[[1.0, 2.0, 3.0, 4.0]]])
+    expected = x * torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True))
+    assert torch.allclose(norm(x), expected)
+
+
+def test_model_uses_rms_norm_instead_of_layer_norm():
+    model = make_model()
+    assert any(isinstance(module, RMSNorm) for module in model.modules())
+    assert not any(isinstance(module, nn.LayerNorm) for module in model.modules())

@@ -13,14 +13,30 @@ def _rotate_half(x: torch.Tensor) -> torch.Tensor:
     return torch.stack((-x_odd, x_even), dim=-1).flatten(-2)
 
 
-def apply_rope(x: torch.Tensor, inv_freq: torch.Tensor) -> torch.Tensor:
-    _, t, head_size = x.shape
-    positions = torch.arange(t, device=x.device, dtype=inv_freq.dtype)
+def build_rope_cache(block_size: int, head_size: int) -> tuple[torch.Tensor, torch.Tensor]:
+    positions = torch.arange(block_size, dtype=torch.float32)
+    inv_freq = 1.0 / (10_000 ** (torch.arange(0, head_size, 2).float() / head_size))
     freqs = torch.outer(positions, inv_freq)
     angles = torch.repeat_interleave(freqs, repeats=2, dim=-1)
-    cos = angles.cos().to(dtype=x.dtype).unsqueeze(0)
-    sin = angles.sin().to(dtype=x.dtype).unsqueeze(0)
+    return angles.cos().unsqueeze(0), angles.sin().unsqueeze(0)
+
+
+def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+    t = x.shape[1]
+    cos = cos[:, :t, :].to(dtype=x.dtype)
+    sin = sin[:, :t, :].to(dtype=x.dtype)
     return (x * cos) + (_rotate_half(x) * sin)
+
+
+class RMSNorm(nn.Module):
+    def __init__(self, n_embd: int, eps: float = 1e-6):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(n_embd))
+        self.eps = eps
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        rms = torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
+        return self.weight * x * rms
 
 
 class CausalSelfAttentionHead(nn.Module):
@@ -33,13 +49,14 @@ class CausalSelfAttentionHead(nn.Module):
         self.value = nn.Linear(n_embd, head_size, bias=False)
         self.dropout = nn.Dropout(dropout)
         self.register_buffer("tril", torch.tril(torch.ones(block_size, block_size)))
-        inv_freq = 1.0 / (10_000 ** (torch.arange(0, head_size, 2).float() / head_size))
-        self.register_buffer("rope_inv_freq", inv_freq, persistent=False)
+        rope_cos, rope_sin = build_rope_cache(block_size, head_size)
+        self.register_buffer("rope_cos", rope_cos, persistent=False)
+        self.register_buffer("rope_sin", rope_sin, persistent=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         _, t, _ = x.shape
-        k = apply_rope(self.key(x), self.rope_inv_freq)
-        q = apply_rope(self.query(x), self.rope_inv_freq)
+        k = apply_rope(self.key(x), self.rope_cos, self.rope_sin)
+        q = apply_rope(self.query(x), self.rope_cos, self.rope_sin)
         weights = q @ k.transpose(-2, -1) / math.sqrt(k.shape[-1])
         weights = weights.masked_fill(self.tril[:t, :t] == 0, float("-inf"))
         weights = F.softmax(weights, dim=-1)
@@ -82,8 +99,8 @@ class Block(nn.Module):
         super().__init__()
         self.sa = MultiHeadAttention(n_embd, n_head, block_size, dropout)
         self.ffwd = FeedForward(n_embd, dropout)
-        self.ln1 = nn.LayerNorm(n_embd)
-        self.ln2 = nn.LayerNorm(n_embd)
+        self.ln1 = RMSNorm(n_embd)
+        self.ln2 = RMSNorm(n_embd)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.sa(self.ln1(x))
@@ -112,7 +129,7 @@ class TinyGPT(nn.Module):
         self.blocks = nn.Sequential(
             *[Block(n_embd, n_head, block_size, dropout) for _ in range(n_layer)]
         )
-        self.ln_f = nn.LayerNorm(n_embd)
+        self.ln_f = RMSNorm(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size)
         self.apply(self._init_weights)
 
