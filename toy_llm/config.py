@@ -59,6 +59,9 @@ class TrainConfig:
     tokenizer_kind: str = "subword"
     tokenizer_vocab_size: int = 256
     tokenizer_train_chars: int = 10_000
+    tokenizer_model_path: str | None = None
+    tokenizer_prefix: str | None = None
+    tokenizer_model_type: str = "bpe"
     corpus_cache_path: str | None = None
     fetch_timeout: float = 20.0
     user_agent: str = "toy-llm/0.1 academic corpus builder"
@@ -94,12 +97,20 @@ class TrainConfig:
     def validate(self) -> None:
         if self.dataset_kind not in {"text", "url_list", "wikipedia_titles"}:
             raise ValueError("dataset_kind must be 'text', 'url_list', or 'wikipedia_titles'")
-        if self.tokenizer_kind not in {"subword", "char"}:
-            raise ValueError("tokenizer_kind must be 'subword' or 'char'")
+        if self.tokenizer_kind not in {"subword", "char", "sentencepiece"}:
+            raise ValueError("tokenizer_kind must be 'subword', 'char', or 'sentencepiece'")
         if self.tokenizer_vocab_size <= 0:
             raise ValueError("tokenizer_vocab_size must be > 0")
         if self.tokenizer_train_chars <= 0:
             raise ValueError("tokenizer_train_chars must be > 0")
+        if self.tokenizer_model_type not in {"bpe", "unigram"}:
+            raise ValueError("tokenizer_model_type must be 'bpe' or 'unigram'")
+        if self.tokenizer_kind == "sentencepiece" and not (
+            self.tokenizer_model_path or self.tokenizer_prefix
+        ):
+            raise ValueError(
+                "tokenizer_model_path or tokenizer_prefix must be provided for sentencepiece"
+            )
         if self.fetch_timeout <= 0:
             raise ValueError("fetch_timeout must be > 0")
         if not self.wikipedia_language:

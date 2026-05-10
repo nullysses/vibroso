@@ -25,6 +25,34 @@ def test_train_config_validates_model_shape():
         )
 
 
+def test_train_config_accepts_sentencepiece_tokenizer_fields():
+    config = TrainConfig.from_dict(
+        {
+            "tokenizer_kind": "sentencepiece",
+            "tokenizer_vocab_size": 1024,
+            "tokenizer_model_type": "bpe",
+            "tokenizer_prefix": "tokenizers/sentencepiece/test_1024",
+            "tokenizer_model_path": "tokenizers/sentencepiece/test_1024.model",
+        }
+    )
+    assert config.tokenizer_kind == "sentencepiece"
+    assert config.tokenizer_model_type == "bpe"
+
+
+def test_train_config_rejects_invalid_sentencepiece_settings():
+    with pytest.raises(ValueError, match="tokenizer_model_type"):
+        TrainConfig.from_dict(
+            {
+                "tokenizer_kind": "sentencepiece",
+                "tokenizer_model_type": "word",
+                "tokenizer_prefix": "tokenizers/sentencepiece/test",
+            }
+        )
+
+    with pytest.raises(ValueError, match="tokenizer_model_path or tokenizer_prefix"):
+        TrainConfig.from_dict({"tokenizer_kind": "sentencepiece"})
+
+
 def test_inference_config_validates_sampling_values():
     with pytest.raises(ValueError, match="temperature"):
         InferenceConfig(prompt="hello", temperature=0).validate()

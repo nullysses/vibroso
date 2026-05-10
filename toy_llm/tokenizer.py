@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import re
 from collections import Counter, OrderedDict
+from pathlib import Path
 from typing import Protocol
 
 
 _CHUNK_RE = re.compile(r"\s+\S*|[^\s]+")
+_SENTENCEPIECE_IMPORT_ERROR = (
+    "SentencePiece tokenizer requested, but sentencepiece is not installed. "
+    "Install it with: pip install sentencepiece"
+)
 
 
 class Tokenizer(Protocol):
@@ -203,7 +208,7 @@ class SubwordTokenizer:
         return {
             "kind": "subword",
             "algorithm": "byte_bpe",
-            "version": 3,
+            "version": 4,
             "merges": [list(pair) for pair in self.merges],
         }
 
@@ -214,11 +219,98 @@ class SubwordTokenizer:
         return cls(merges)
 
 
+class SentencePieceTokenizer:
+    def __init__(self, model_path: str | Path):
+        model_file = Path(model_path)
+        if not model_file.exists():
+            raise FileNotFoundError(
+                f"SentencePiece model file not found: {model_file}\n"
+                "This checkpoint requires the tokenizer model used during training."
+            )
+        try:
+            import sentencepiece as spm
+        except ImportError as exc:
+            raise ImportError(_SENTENCEPIECE_IMPORT_ERROR) from exc
+
+        self.model_path = str(model_file)
+        self.processor = spm.SentencePieceProcessor()
+        loaded = self.processor.Load(self.model_path)
+        if not loaded:
+            raise ValueError(f"Failed to load SentencePiece model: {self.model_path}")
+
+    @property
+    def vocab_size(self) -> int:
+        return int(self.processor.GetPieceSize())
+
+    def encode(self, text: str) -> list[int]:
+        return [int(token_id) for token_id in self.processor.EncodeAsIds(text)]
+
+    def decode(self, ids: list[int] | tuple[int, ...]) -> str:
+        return str(self.processor.DecodeIds([int(token_id) for token_id in ids]))
+
+    def encode_to_pieces(self, text: str) -> list[str]:
+        return [str(piece) for piece in self.processor.EncodeAsPieces(text)]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "kind": "sentencepiece",
+            "algorithm": "sentencepiece",
+            "version": 1,
+            "model_path": self.model_path,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> "SentencePieceTokenizer":
+        model_path = data.get("model_path")
+        if not model_path:
+            raise ValueError("SentencePiece tokenizer checkpoint is missing 'model_path'")
+        return cls(str(model_path))
+
+
+def train_sentencepiece_tokenizer(
+    text: str,
+    model_prefix: str | Path,
+    vocab_size: int,
+    model_type: str = "bpe",
+) -> SentencePieceTokenizer:
+    try:
+        import sentencepiece as spm
+    except ImportError as exc:
+        raise ImportError(_SENTENCEPIECE_IMPORT_ERROR) from exc
+
+    if model_type not in {"bpe", "unigram"}:
+        raise ValueError("tokenizer_model_type must be 'bpe' or 'unigram'")
+    if not text:
+        raise ValueError("Cannot build tokenizer from empty text")
+
+    prefix_path = Path(model_prefix)
+    prefix_path.parent.mkdir(parents=True, exist_ok=True)
+    training_path = prefix_path.with_suffix(".train.txt")
+    training_path.write_text(text, encoding="utf-8")
+
+    spm.SentencePieceTrainer.Train(
+        input=str(training_path),
+        model_prefix=str(prefix_path),
+        vocab_size=vocab_size,
+        model_type=model_type,
+        character_coverage=0.9995,
+        bos_id=-1,
+        eos_id=-1,
+        pad_id=-1,
+        unk_id=0,
+        hard_vocab_limit=False,
+    )
+    return SentencePieceTokenizer(prefix_path.with_suffix(".model"))
+
+
 def build_tokenizer(
     text: str,
     kind: str = "subword",
     vocab_size: int = 256,
     max_train_chars: int | None = 10_000,
+    sentencepiece_model_path: str | None = None,
+    sentencepiece_prefix: str | None = None,
+    sentencepiece_model_type: str = "bpe",
 ) -> Tokenizer:
     if kind == "char":
         return CharTokenizer.from_text(text)
@@ -228,18 +320,36 @@ def build_tokenizer(
             vocab_size=vocab_size,
             max_train_chars=max_train_chars,
         )
-    raise ValueError("Tokenizer kind must be 'subword' or 'char'")
+    if kind == "sentencepiece":
+        if sentencepiece_model_path and Path(sentencepiece_model_path).exists():
+            return SentencePieceTokenizer(sentencepiece_model_path)
+        if not sentencepiece_prefix:
+            raise ValueError(
+                "tokenizer_prefix must be provided when training a SentencePiece tokenizer"
+            )
+        train_text = text if max_train_chars is None else text[:max_train_chars]
+        return train_sentencepiece_tokenizer(
+            train_text,
+            model_prefix=sentencepiece_prefix,
+            vocab_size=vocab_size,
+            model_type=sentencepiece_model_type,
+        )
+    raise ValueError("Tokenizer kind must be 'subword', 'char', or 'sentencepiece'")
 
 
 def tokenizer_from_dict(data: dict[str, object]) -> Tokenizer:
     kind = data.get("kind")
     if kind == "subword":
-        if data.get("algorithm") != "byte_bpe" or int(data.get("version", 1)) < 3:
+        if data.get("algorithm") != "byte_bpe" or int(data.get("version", 1)) < 4:
             raise ValueError(
                 "This subword tokenizer checkpoint is incompatible with the current "
                 "byte-level BPE tokenizer. Retrain from scratch to create a new checkpoint."
             )
         return SubwordTokenizer.from_dict(data)
+    if kind == "sentencepiece":
+        if data.get("algorithm") != "sentencepiece" or int(data.get("version", 0)) < 1:
+            raise ValueError("SentencePiece tokenizer checkpoint is incompatible")
+        return SentencePieceTokenizer.from_dict(data)
     if kind == "char" or kind is None:
         return CharTokenizer.from_dict(data)  # type: ignore[arg-type]
     raise ValueError(f"Unknown tokenizer kind in checkpoint: {kind!r}")

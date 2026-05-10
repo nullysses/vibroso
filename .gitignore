@@ -24,6 +24,9 @@ mlruns/
 logs/
 *.log
 
+# SentencePiece temporary training corpora
+tokenizers/**/*.train.txt
+
 # Python cache / build artifacts
 __pycache__/
 *.py[cod]

@@ -1,6 +1,13 @@
 import pytest
 
-from toy_llm.tokenizer import CharTokenizer, SubwordTokenizer, build_tokenizer, tokenizer_from_dict
+from toy_llm.tokenizer import (
+    CharTokenizer,
+    SentencePieceTokenizer,
+    SubwordTokenizer,
+    build_tokenizer,
+    tokenizer_from_dict,
+    train_sentencepiece_tokenizer,
+)
 
 
 def test_vocabulary_construction_is_deterministic():
@@ -63,6 +70,19 @@ def test_subword_tokenizer_shortens_repeated_sentence():
     assert any(len(piece) > 1 for piece in pieces)
 
 
+def test_subword_encode_applies_learned_merges_to_common_sentence():
+    sentence = "A tortilla is a traditional Mexican flatbread."
+    corpus = (sentence + "\n") * 200
+    tokenizer = SubwordTokenizer.from_text(corpus, vocab_size=320)
+    ids = tokenizer.encode(sentence)
+    pieces = tokenizer.encode_to_pieces(sentence)
+
+    assert tokenizer.decode(ids) == sentence
+    assert len(ids) <= 20
+    assert len(ids) == len(pieces)
+    assert any(len(piece) > 1 for piece in pieces)
+
+
 def test_subword_training_window_still_keeps_full_base_vocabulary():
     tokenizer = SubwordTokenizer.from_text("aaaa xyz", vocab_size=6, max_train_chars=4)
     assert tokenizer.decode(tokenizer.encode("xyz 😄")) == "xyz 😄"
@@ -85,9 +105,70 @@ def test_subword_tokenizer_handles_unseen_unicode_bytes():
 def test_old_subword_checkpoint_payload_is_rejected():
     payload = {
         "kind": "subword",
-        "version": 2,
+        "algorithm": "byte_bpe",
+        "version": 3,
         "chars": ["a", "b"],
         "merges": [["a", "b"]],
     }
     with pytest.raises(ValueError, match="incompatible"):
         tokenizer_from_dict(payload)
+
+
+def test_sentencepiece_checkpoint_requires_model_path():
+    with pytest.raises(ValueError, match="missing 'model_path'"):
+        tokenizer_from_dict({"kind": "sentencepiece", "algorithm": "sentencepiece", "version": 1})
+
+
+def test_old_sentencepiece_checkpoint_payload_is_rejected():
+    with pytest.raises(ValueError, match="incompatible"):
+        tokenizer_from_dict({"kind": "sentencepiece", "model_path": "tokenizer.model"})
+
+
+def test_sentencepiece_checkpoint_reports_missing_model_file(tmp_path):
+    payload = {
+        "kind": "sentencepiece",
+        "algorithm": "sentencepiece",
+        "version": 1,
+        "model_path": str(tmp_path / "missing.model"),
+    }
+    with pytest.raises(FileNotFoundError, match="SentencePiece model file not found"):
+        tokenizer_from_dict(payload)
+
+
+def test_sentencepiece_tokenizer_round_trips_when_installed(tmp_path):
+    pytest.importorskip("sentencepiece")
+    text = "A tortilla is a traditional Mexican flatbread.\n" * 20
+    tokenizer = train_sentencepiece_tokenizer(
+        text,
+        model_prefix=tmp_path / "sp_test",
+        vocab_size=64,
+        model_type="bpe",
+    )
+    sample = "A tortilla is a traditional Mexican flatbread."
+    ids = tokenizer.encode(sample)
+    restored = SentencePieceTokenizer.from_dict(tokenizer.to_dict())
+
+    assert tokenizer.decode(ids) == sample
+    assert restored.decode(restored.encode(sample)) == sample
+    assert 0 < tokenizer.vocab_size <= 64
+    assert any(piece.startswith("▁") for piece in tokenizer.encode_to_pieces(sample))
+
+
+def test_build_tokenizer_loads_existing_sentencepiece_model_when_installed(tmp_path):
+    pytest.importorskip("sentencepiece")
+    text = "Machine learning models are trained using data.\n" * 20
+    trained = train_sentencepiece_tokenizer(
+        text,
+        model_prefix=tmp_path / "sp_existing",
+        vocab_size=64,
+        model_type="bpe",
+    )
+    loaded = build_tokenizer(
+        text,
+        kind="sentencepiece",
+        vocab_size=64,
+        sentencepiece_model_path=trained.model_path,
+        sentencepiece_prefix=str(tmp_path / "unused"),
+    )
+
+    assert loaded.decode(loaded.encode("Machine learning models")) == "Machine learning models"

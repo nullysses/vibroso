@@ -38,6 +38,9 @@ def main() -> None:
         kind=config.tokenizer_kind,
         vocab_size=config.tokenizer_vocab_size,
         max_train_chars=config.tokenizer_train_chars,
+        sentencepiece_model_path=config.tokenizer_model_path,
+        sentencepiece_prefix=config.tokenizer_prefix,
+        sentencepiece_model_type=config.tokenizer_model_type,
     )
 
     ids = tokenizer.encode(text)

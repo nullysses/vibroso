@@ -28,7 +28,7 @@ python scripts/train.py --config configs/tiny.yaml
 
 Checkpoints are written to `checkpoints/latest.pt`.
 
-The default tokenizer is a small trainable byte-level BPE tokenizer. It starts with all 256 byte values, learns frequent adjacent byte-token merges from the training corpus, and stores the learned merges in the checkpoint. Use `tokenizer_kind: char` in a config if you want the original character-level behavior.
+The default tokenizer is a small trainable byte-level BPE tokenizer. It starts with all 256 byte values, learns frequent adjacent byte-token merges from the training corpus, and stores the learned merges in the checkpoint. Use `tokenizer_kind: char` in a config if you want the original character-level behavior, or `tokenizer_kind: sentencepiece` for the optimized SentencePiece backend.
 
 After tokenizer changes, retrain from scratch instead of resuming older subword checkpoints. Old subword tokenizer payloads are rejected so model weights are not reused with incompatible token IDs.
 
@@ -92,6 +92,12 @@ The inspector uses the subword tokenizer by default. To inspect the character to
 
 ```bash
 python scripts/inspect_tokenizer.py --dataset data/input.txt --tokenizer char
+```
+
+To inspect or train a SentencePiece tokenizer:
+
+```bash
+python scripts/inspect_tokenizer.py --dataset data/input.txt --tokenizer sentencepiece --tokenizer-prefix tokenizers/sentencepiece/local_4096 --vocab-size 4096
 ```
 
 For a URL list:

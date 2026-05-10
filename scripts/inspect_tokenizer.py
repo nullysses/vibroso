@@ -24,9 +24,12 @@ def main() -> None:
     )
     parser.add_argument("--cache", default=None, help="Optional cache file for fetched URL corpus.")
     parser.add_argument("--language", default="en", help="Wikipedia language code.")
-    parser.add_argument("--tokenizer", choices=["subword", "char"], default="subword")
+    parser.add_argument("--tokenizer", choices=["subword", "char", "sentencepiece"], default="subword")
     parser.add_argument("--vocab-size", type=int, default=256)
     parser.add_argument("--tokenizer-train-chars", type=int, default=10_000)
+    parser.add_argument("--tokenizer-model-path", default=None)
+    parser.add_argument("--tokenizer-prefix", default=None)
+    parser.add_argument("--tokenizer-model-type", choices=["bpe", "unigram"], default="bpe")
     args = parser.parse_args()
 
     dataset_kind = "text"
@@ -47,6 +50,9 @@ def main() -> None:
         kind=args.tokenizer,
         vocab_size=args.vocab_size,
         max_train_chars=args.tokenizer_train_chars,
+        sentencepiece_model_path=args.tokenizer_model_path,
+        sentencepiece_prefix=args.tokenizer_prefix,
+        sentencepiece_model_type=args.tokenizer_model_type,
     )
     print(f"characters: {len(text)}")
     print(f"tokens: {len(tokenizer.encode(text))}")
@@ -54,11 +60,12 @@ def main() -> None:
     print(f"vocab_size: {tokenizer.vocab_size}")
     if hasattr(tokenizer, "merge_count"):
         print(f"subword merges: {tokenizer.merge_count}")
-    print("vocabulary:")
-    tokens = getattr(tokenizer, "tokens", getattr(tokenizer, "chars"))
-    for idx, token in enumerate(tokens):
-        printable = token if token not in {"\n", "\t", "\r"} else repr(token)
-        print(f"{idx:>3}: {printable}")
+    tokens = getattr(tokenizer, "tokens", getattr(tokenizer, "chars", None))
+    if tokens is not None:
+        print("vocabulary:")
+        for idx, token in enumerate(tokens):
+            printable = token if token not in {"\n", "\t", "\r"} else repr(token)
+            print(f"{idx:>3}: {printable}")
 
 
 if __name__ == "__main__":

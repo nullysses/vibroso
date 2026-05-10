@@ -69,6 +69,9 @@ def main() -> None:
             kind=config.tokenizer_kind,
             vocab_size=config.tokenizer_vocab_size,
             max_train_chars=config.tokenizer_train_chars,
+            sentencepiece_model_path=config.tokenizer_model_path,
+            sentencepiece_prefix=config.tokenizer_prefix,
+            sentencepiece_model_type=config.tokenizer_model_type,
         )
         _print_elapsed("building tokenizer", phase_start)
     print("encoding dataset...")
@@ -114,6 +117,9 @@ def main() -> None:
         "vocab_size": tokenizer.vocab_size,
         "tokenizer_kind": config.tokenizer_kind,
         "tokenizer_train_chars": config.tokenizer_train_chars,
+        "tokenizer_model_path": config.tokenizer_model_path,
+        "tokenizer_prefix": config.tokenizer_prefix,
+        "tokenizer_model_type": config.tokenizer_model_type,
         "dataset_chars": len(text),
         "dataset_tokens": dataset_tokens,
         "chars_per_token": len(text) / max(dataset_tokens, 1),

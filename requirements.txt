@@ -2,3 +2,4 @@ torch
 pyyaml
 pytest
 wikipedia-api
+sentencepiece
