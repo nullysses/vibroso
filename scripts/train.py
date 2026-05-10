@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import torch
@@ -18,6 +19,18 @@ from toy_llm.model import TinyGPT
 from toy_llm.sampling import count_parameters
 from toy_llm.tokenizer import build_tokenizer, tokenizer_from_dict
 from toy_llm.train_loop import train
+
+
+def _format_elapsed(seconds: float) -> str:
+    return f"{seconds:.2f}s"
+
+
+def _time_start() -> float:
+    return time.perf_counter()
+
+
+def _print_elapsed(label: str, start: float) -> None:
+    print(f"{label} done in {_format_elapsed(time.perf_counter() - start)}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,16 +56,22 @@ def main() -> None:
         start_step = int(checkpoint.get("step", 0))
         optimizer_state = checkpoint.get("optimizer_state_dict")
 
+    phase_start = _time_start()
     text = load_corpus(config)
+    _print_elapsed("loading corpus", phase_start)
+
     if not args.resume:
         print("building tokenizer...")
+        phase_start = _time_start()
         tokenizer = build_tokenizer(
             text,
             kind=config.tokenizer_kind,
             vocab_size=config.tokenizer_vocab_size,
             max_train_chars=config.tokenizer_train_chars,
         )
+        _print_elapsed("building tokenizer", phase_start)
     print("encoding dataset...")
+    phase_start = _time_start()
     dataset = TextDataset.from_text(
         text,
         tokenizer,
@@ -61,6 +80,9 @@ def main() -> None:
         config.batch_size,
         device,
     )
+    _print_elapsed("encoding dataset", phase_start)
+
+    phase_start = _time_start()
     model = TinyGPT(
         vocab_size=tokenizer.vocab_size,
         block_size=config.block_size,
@@ -72,8 +94,10 @@ def main() -> None:
 
     if args.resume:
         model.load_state_dict(checkpoint["model_state_dict"])
+    _print_elapsed("initializing model", phase_start)
 
     print(f"device: {device}")
+    phase_start = _time_start()
     print(f"dataset chars: {len(text)}")
     print(f"dataset tokens: {len(tokenizer.encode(text))}")
     print(f"tokenizer: {config.tokenizer_kind}")
@@ -81,6 +105,7 @@ def main() -> None:
     if hasattr(tokenizer, "merge_count"):
         print(f"subword merges: {tokenizer.merge_count}")
     print(f"parameters: {count_parameters(model):,}")
+    _print_elapsed("startup stats", phase_start)
 
     train(
         model=model,

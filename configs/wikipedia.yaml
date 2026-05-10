@@ -1,25 +1,25 @@
 dataset_path: data/my_wikipedia_pages.txt
 dataset_kind: wikipedia_titles
 tokenizer_kind: subword
-tokenizer_vocab_size: 2048
-tokenizer_train_chars: 10000
+tokenizer_vocab_size: 4096
+tokenizer_train_chars: 500000
 corpus_cache_path: data/fetched_wikipedia_corpus.txt
 wikipedia_language: en
 user_agent: "vibroso/0.1 academic corpus builder"
 checkpoint_dir: checkpoints
 
 seed: 1337
-device: auto
+device: cuda
 
 train_split: 0.9
-batch_size: 16
-block_size: 64
+batch_size: 32
+block_size: 256
 
-max_steps: 2000
+max_steps: 20000
 eval_interval: 100
 eval_iters: 20
 checkpoint_interval: 500
-learning_rate: 0.001
+learning_rate: 0.0003
 weight_decay: 0.1
 
 model:
