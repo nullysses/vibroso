@@ -1,3 +1,5 @@
+import json
+
 import torch
 
 from toy_llm.config import ModelConfig, TrainConfig
@@ -48,3 +50,51 @@ def test_train_loop_runs_on_cpu_with_amp_disabled(tmp_path):
     train(model, dataset, tokenizer, config)
 
     assert (tmp_path / "latest.pt").exists()
+
+
+def test_train_loop_writes_jsonl_metrics(tmp_path):
+    torch.manual_seed(0)
+    text = "abcdefghijklmnopqrstuvwxyz" * 8
+    tokenizer = CharTokenizer.from_text(text)
+    device = torch.device("cpu")
+    dataset = TextDataset.from_text(
+        text,
+        tokenizer,
+        train_split=0.9,
+        block_size=8,
+        batch_size=2,
+        device=device,
+    )
+    config = TrainConfig(
+        checkpoint_dir=str(tmp_path / "checkpoints"),
+        max_steps=1,
+        eval_interval=1,
+        eval_iters=1,
+        checkpoint_interval=1,
+        batch_size=2,
+        block_size=8,
+        model=ModelConfig(n_embd=8, n_head=2, n_layer=1, dropout=0.0),
+    )
+    model = TinyGPT(
+        vocab_size=tokenizer.vocab_size,
+        block_size=config.block_size,
+        n_embd=config.model.n_embd,
+        n_head=config.model.n_head,
+        n_layer=config.model.n_layer,
+        dropout=config.model.dropout,
+    )
+    metrics_path = tmp_path / "runs" / "metrics.jsonl"
+
+    train(
+        model,
+        dataset,
+        tokenizer,
+        config,
+        metrics_path=metrics_path,
+        metrics_metadata={"vocab_size": tokenizer.vocab_size},
+    )
+
+    records = [json.loads(line) for line in metrics_path.read_text(encoding="utf-8").splitlines()]
+    assert records
+    assert {"step", "train_loss", "val_loss", "val_perplexity", "tokens_per_sec"} <= set(records[0])
+    assert records[0]["vocab_size"] == tokenizer.vocab_size

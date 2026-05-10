@@ -1,4 +1,7 @@
 from __future__ import annotations
+
+import json
+import time
 from pathlib import Path
 
 import torch
@@ -49,6 +52,8 @@ def train(
     config: TrainConfig,
     start_step: int = 0,
     optimizer_state_dict: dict | None = None,
+    metrics_path: str | Path | None = None,
+    metrics_metadata: dict[str, object] | None = None,
 ) -> None:
     optimizer = make_optimizer(model, config.learning_rate, config.weight_decay)
     if optimizer_state_dict is not None:
@@ -60,9 +65,24 @@ def train(
     latest_losses: dict[str, float | None] = {"train": None, "val": None}
     checkpoint_dir = Path(config.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    metrics_file = Path(metrics_path) if metrics_path is not None else None
+    if metrics_file is not None:
+        metrics_file.parent.mkdir(parents=True, exist_ok=True)
+        metrics_file.write_text("", encoding="utf-8")
+    metrics_base = dict(metrics_metadata or {})
+    last_metrics_time = time.perf_counter()
+    last_metrics_step = start_step
 
     for step in range(start_step, config.max_steps + 1):
         if step % config.eval_interval == 0:
+            now = time.perf_counter()
+            trained_steps = step - last_metrics_step
+            elapsed = now - last_metrics_time
+            tokens_per_sec = (
+                trained_steps * config.batch_size * config.block_size / elapsed
+                if trained_steps > 0 and elapsed > 0
+                else 0.0
+            )
             losses = estimate_loss(model, dataset, config.eval_iters)
             latest_losses = losses
             train_ppl = torch.exp(torch.tensor(losses["train"])).item()
@@ -71,6 +91,19 @@ def train(
                 f"step {step}: train loss {losses['train']:.4f}, "
                 f"val loss {losses['val']:.4f}, train ppl {train_ppl:.2f}, val ppl {val_ppl:.2f}"
             )
+            if metrics_file is not None:
+                record = {
+                    **metrics_base,
+                    "step": step,
+                    "train_loss": losses["train"],
+                    "val_loss": losses["val"],
+                    "val_perplexity": val_ppl,
+                    "tokens_per_sec": tokens_per_sec,
+                }
+                with metrics_file.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(record, sort_keys=True) + "\n")
+            last_metrics_time = time.perf_counter()
+            last_metrics_step = step
 
         if step % config.checkpoint_interval == 0 and step != start_step:
             save_checkpoint(

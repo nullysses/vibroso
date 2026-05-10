@@ -37,6 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a tiny character-level GPT.")
     parser.add_argument("--config", default="configs/tiny.yaml", help="Path to YAML config.")
     parser.add_argument("--resume", default=None, help="Optional checkpoint path to resume from.")
+    parser.add_argument("--metrics", default=None, help="Optional JSONL metrics output path.")
     return parser.parse_args()
 
 
@@ -98,14 +99,37 @@ def main() -> None:
 
     print(f"device: {device}")
     phase_start = _time_start()
+    dataset_tokens = len(dataset.train_data) + len(dataset.val_data)
     print(f"dataset chars: {len(text)}")
-    print(f"dataset tokens: {len(tokenizer.encode(text))}")
+    print(f"dataset tokens: {dataset_tokens}")
     print(f"tokenizer: {config.tokenizer_kind}")
     print(f"vocab_size: {tokenizer.vocab_size}")
     if hasattr(tokenizer, "merge_count"):
         print(f"subword merges: {tokenizer.merge_count}")
-    print(f"parameters: {count_parameters(model):,}")
+    parameters = count_parameters(model)
+    print(f"parameters: {parameters:,}")
     _print_elapsed("startup stats", phase_start)
+
+    metrics_metadata = {
+        "vocab_size": tokenizer.vocab_size,
+        "tokenizer_kind": config.tokenizer_kind,
+        "tokenizer_train_chars": config.tokenizer_train_chars,
+        "dataset_chars": len(text),
+        "dataset_tokens": dataset_tokens,
+        "chars_per_token": len(text) / max(dataset_tokens, 1),
+        "parameters": parameters,
+        "block_size": config.block_size,
+        "batch_size": config.batch_size,
+        "max_steps": config.max_steps,
+        "learning_rate": config.learning_rate,
+        "weight_decay": config.weight_decay,
+        "model": {
+            "n_embd": config.model.n_embd,
+            "n_head": config.model.n_head,
+            "n_layer": config.model.n_layer,
+            "dropout": config.model.dropout,
+        },
+    }
 
     train(
         model=model,
@@ -114,6 +138,8 @@ def main() -> None:
         config=config,
         start_step=start_step,
         optimizer_state_dict=optimizer_state,
+        metrics_path=args.metrics,
+        metrics_metadata=metrics_metadata,
     )
 
 
