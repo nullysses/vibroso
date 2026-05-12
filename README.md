@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/vibroso-logo.svg" alt="Vibroso logo" width="720">
+  <img src="assets/vibroso-logo.png" alt="Vibroso logo" width="720">
 </p>
 
 # Vibroso
