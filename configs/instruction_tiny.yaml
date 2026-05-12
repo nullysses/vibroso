@@ -1,0 +1,29 @@
+dataset_path: data/instruction_examples.example.jsonl
+dataset_kind: instruction_jsonl
+
+tokenizer_kind: subword
+tokenizer_vocab_size: 512
+tokenizer_train_chars: 10000
+
+checkpoint_dir: checkpoints/instruct
+
+seed: 1337
+device: auto
+
+train_split: 0.8
+batch_size: 2
+block_size: 16
+
+max_steps: 1000
+eval_interval: 100
+eval_iters: 10
+checkpoint_interval: 250
+learning_rate: 0.0005
+weight_decay: 0.1
+
+model:
+  n_embd: 64
+  n_head: 4
+  n_layer: 2
+  dropout: 0.1
+  mlp_type: swiglu

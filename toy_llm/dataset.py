@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -53,6 +55,86 @@ def parse_title_list(path: str | Path) -> list[str]:
     if not titles:
         raise ValueError(f"Title list contains no Wikipedia page titles: {path}")
     return titles
+
+
+def _require_non_empty_string(row: dict[str, Any], key: str, line_no: int) -> str:
+    value = row.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(
+            f"Invalid instruction JSONL row at line {line_no}: "
+            f"field {key!r} must be a non-empty string"
+        )
+    return value.strip()
+
+
+def format_instruction_example(
+    instruction: str,
+    response: str,
+    context: str | None = None,
+) -> str:
+    instruction = instruction.strip()
+    response = response.strip()
+    context = context.strip() if context else ""
+    if context:
+        return (
+            "<|user|>\n"
+            f"{instruction}\n\n"
+            "Context:\n"
+            f"{context}\n"
+            "<|assistant|>\n"
+            f"{response}\n"
+            "<|end|>\n"
+        )
+    return (
+        "<|user|>\n"
+        f"{instruction}\n"
+        "<|assistant|>\n"
+        f"{response}\n"
+        "<|end|>\n"
+    )
+
+
+def load_instruction_jsonl(path: str | Path) -> str:
+    dataset_path = Path(path)
+    if not dataset_path.exists():
+        raise FileNotFoundError(f"Instruction JSONL file not found: {dataset_path}")
+    if not dataset_path.is_file():
+        raise ValueError(f"Instruction JSONL path is not a file: {dataset_path}")
+
+    examples: list[str] = []
+    with dataset_path.open("r", encoding="utf-8") as f:
+        for line_no, line in enumerate(f, start=1):
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                row = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Invalid JSON at {dataset_path}:{line_no}: {exc.msg}") from exc
+            if not isinstance(row, dict):
+                raise ValueError(
+                    f"Invalid instruction JSONL row at line {line_no}: expected a JSON object"
+                )
+
+            instruction = _require_non_empty_string(row, "instruction", line_no)
+            response = _require_non_empty_string(row, "response", line_no)
+            context_value = row.get("context")
+            if context_value is not None and not isinstance(context_value, str):
+                raise ValueError(
+                    f"Invalid instruction JSONL row at line {line_no}: "
+                    "field 'context' must be a string when present"
+                )
+            examples.append(
+                format_instruction_example(
+                    instruction=instruction,
+                    response=response,
+                    context=context_value,
+                )
+            )
+
+    if not examples:
+        raise ValueError(f"Instruction JSONL file contains no examples: {dataset_path}")
+    return "\n".join(examples)
 
 
 class _ReadableHTMLParser(HTMLParser):
@@ -187,6 +269,8 @@ def load_wikipedia_titles_corpus(
 def load_corpus(config: TrainConfig) -> str:
     if config.dataset_kind == "text":
         return load_text(config.dataset_path)
+    if config.dataset_kind == "instruction_jsonl":
+        return load_instruction_jsonl(config.dataset_path)
     if config.corpus_cache_path:
         cache_file = Path(config.corpus_cache_path)
         if cache_file.exists():

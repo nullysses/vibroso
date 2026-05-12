@@ -12,6 +12,7 @@ data/*.json
 data/*.csv
 data/*.parquet
 data/*.pkl
+!data/instruction_examples.example.jsonl
 
 # Keep placeholder files
 !checkpoints/.gitkeep

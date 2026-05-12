@@ -98,8 +98,11 @@ class TrainConfig:
         return asdict(self)
 
     def validate(self) -> None:
-        if self.dataset_kind not in {"text", "url_list", "wikipedia_titles"}:
-            raise ValueError("dataset_kind must be 'text', 'url_list', or 'wikipedia_titles'")
+        if self.dataset_kind not in {"text", "url_list", "wikipedia_titles", "instruction_jsonl"}:
+            raise ValueError(
+                "dataset_kind must be 'text', 'url_list', 'wikipedia_titles', "
+                "or 'instruction_jsonl'"
+            )
         if self.tokenizer_kind not in {"subword", "char", "sentencepiece"}:
             raise ValueError("tokenizer_kind must be 'subword', 'char', or 'sentencepiece'")
         if self.tokenizer_vocab_size <= 0:

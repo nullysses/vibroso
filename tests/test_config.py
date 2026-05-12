@@ -36,6 +36,16 @@ def test_model_config_accepts_swiglu_mlp_type():
     assert config.mlp_type == "swiglu"
 
 
+def test_train_config_accepts_instruction_jsonl_dataset_kind():
+    config = TrainConfig.from_dict(
+        {
+            "dataset_path": "data/instruction_examples.example.jsonl",
+            "dataset_kind": "instruction_jsonl",
+        }
+    )
+    assert config.dataset_kind == "instruction_jsonl"
+
+
 def test_train_config_accepts_sentencepiece_tokenizer_fields():
     config = TrainConfig.from_dict(
         {

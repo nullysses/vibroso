@@ -96,6 +96,32 @@ To resume training:
 python scripts/train.py --config configs/tiny.yaml --resume checkpoints/latest.pt
 ```
 
+## Instruction JSONL
+
+Small instruction datasets can be loaded with `dataset_kind: instruction_jsonl`. Each line must be a JSON object with `instruction` and `response`; `context` is optional.
+
+```jsonl
+{"instruction":"What is a tortilla?","response":"A tortilla is a thin flatbread made from corn or wheat flour."}
+```
+
+Preview the formatted chat-style corpus:
+
+```bash
+python scripts/preview_instruction_dataset.py --dataset data/instruction_examples.example.jsonl --limit 3
+```
+
+Train the tiny example:
+
+```bash
+python scripts/train.py --config configs/instruction_tiny.yaml
+```
+
+Instruction prompts should use the same markers:
+
+```bash
+python scripts/generate.py --checkpoint checkpoints/instruct/latest.pt --prompt "<|user|>\nWhat is a tortilla?\n<|assistant|>\n" --temperature 0.4 --top-k 20 --max-new-tokens 120
+```
+
 ## Generate
 
 ```bash
