@@ -17,8 +17,51 @@ from toy_llm.dataset import TextDataset, load_corpus
 from toy_llm.device import get_device
 from toy_llm.model import TinyGPT
 from toy_llm.sampling import count_parameters
-from toy_llm.tokenizer import build_tokenizer, tokenizer_from_dict
+from toy_llm.tokenizer import Tokenizer, build_tokenizer, tokenizer_from_dict
 from toy_llm.train_loop import train
+
+
+def validate_init_from_compatibility(new_config: TrainConfig, base_config: TrainConfig) -> None:
+    if new_config.block_size != base_config.block_size:
+        raise ValueError(
+            "init-from requires matching block_size: "
+            f"new={new_config.block_size}, checkpoint={base_config.block_size}"
+        )
+
+    if new_config.model != base_config.model:
+        raise ValueError(
+            "init-from requires matching model config. "
+            f"new={new_config.model}, checkpoint={base_config.model}"
+        )
+
+
+def load_training_state(
+    args: argparse.Namespace,
+    config: TrainConfig,
+    device: torch.device,
+) -> tuple[TrainConfig, torch.device, dict | None, Tokenizer | None, int, dict | None]:
+    if args.resume and args.init_from:
+        raise ValueError("Use either --resume or --init-from, not both.")
+
+    checkpoint = None
+    tokenizer = None
+    optimizer_state = None
+    start_step = 0
+
+    if args.resume:
+        checkpoint = load_checkpoint(args.resume, device)
+        config = TrainConfig.from_dict(checkpoint["config"])
+        device = get_device(config.device)
+        tokenizer = tokenizer_from_dict(checkpoint["tokenizer"])
+        start_step = int(checkpoint.get("step", 0))
+        optimizer_state = checkpoint.get("optimizer_state_dict")
+    elif args.init_from:
+        checkpoint = load_checkpoint(args.init_from, device)
+        base_config = TrainConfig.from_dict(checkpoint["config"])
+        validate_init_from_compatibility(config, base_config)
+        tokenizer = tokenizer_from_dict(checkpoint["tokenizer"])
+
+    return config, device, checkpoint, tokenizer, start_step, optimizer_state
 
 
 def _format_elapsed(seconds: float) -> str:
@@ -37,6 +80,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a tiny character-level GPT.")
     parser.add_argument("--config", default="configs/tiny.yaml", help="Path to YAML config.")
     parser.add_argument("--resume", default=None, help="Optional checkpoint path to resume from.")
+    parser.add_argument(
+        "--init-from",
+        default=None,
+        help="Initialize model weights and tokenizer from a checkpoint, but start a new training run.",
+    )
     parser.add_argument("--metrics", default=None, help="Optional JSONL metrics output path.")
     return parser.parse_args()
 
@@ -46,22 +94,17 @@ def main() -> None:
     config = TrainConfig.from_yaml(args.config)
     torch.manual_seed(config.seed)
     device = get_device(config.device)
-
-    optimizer_state = None
-    start_step = 0
-    if args.resume:
-        checkpoint = load_checkpoint(args.resume, device)
-        config = TrainConfig.from_dict(checkpoint["config"])
-        device = get_device(config.device)
-        tokenizer = tokenizer_from_dict(checkpoint["tokenizer"])
-        start_step = int(checkpoint.get("step", 0))
-        optimizer_state = checkpoint.get("optimizer_state_dict")
+    config, device, checkpoint, tokenizer, start_step, optimizer_state = load_training_state(
+        args,
+        config,
+        device,
+    )
 
     phase_start = _time_start()
     text = load_corpus(config)
     _print_elapsed("loading corpus", phase_start)
 
-    if not args.resume:
+    if tokenizer is None:
         print("building tokenizer...")
         phase_start = _time_start()
         tokenizer = build_tokenizer(
@@ -97,16 +140,18 @@ def main() -> None:
         mlp_type=config.model.mlp_type,
     ).to(device)
 
-    if args.resume:
+    if checkpoint is not None:
         model.load_state_dict(checkpoint["model_state_dict"])
     _print_elapsed("initializing model", phase_start)
 
     print(f"device: {device}")
     phase_start = _time_start()
     dataset_tokens = len(dataset.train_data) + len(dataset.val_data)
+    tokenizer_payload = tokenizer.to_dict()
+    tokenizer_kind = str(tokenizer_payload.get("kind", config.tokenizer_kind))
     print(f"dataset chars: {len(text)}")
     print(f"dataset tokens: {dataset_tokens}")
-    print(f"tokenizer: {config.tokenizer_kind}")
+    print(f"tokenizer: {tokenizer_kind}")
     print(f"vocab_size: {tokenizer.vocab_size}")
     if hasattr(tokenizer, "merge_count"):
         print(f"subword merges: {tokenizer.merge_count}")
@@ -116,7 +161,7 @@ def main() -> None:
 
     metrics_metadata = {
         "vocab_size": tokenizer.vocab_size,
-        "tokenizer_kind": config.tokenizer_kind,
+        "tokenizer_kind": tokenizer_kind,
         "tokenizer_train_chars": config.tokenizer_train_chars,
         "tokenizer_model_path": config.tokenizer_model_path,
         "tokenizer_prefix": config.tokenizer_prefix,

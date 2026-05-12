@@ -96,6 +96,14 @@ To resume training:
 python scripts/train.py --config configs/tiny.yaml --resume checkpoints/latest.pt
 ```
 
+To fine-tune from a base checkpoint on a new dataset, use `--init-from`. This loads the checkpoint model weights and tokenizer, but keeps the supplied config, starts at step 0, uses a fresh optimizer, and writes to the supplied `checkpoint_dir`.
+
+```bash
+python scripts/train.py --config configs/instruction_tiny.yaml --init-from checkpoints/base/latest.pt
+```
+
+`--init-from` requires the new config to match the checkpoint `block_size` and model architecture.
+
 ## Instruction JSONL
 
 Small instruction datasets can be loaded with `dataset_kind: instruction_jsonl`. Each line must be a JSON object with `instruction` and `response`; `context` is optional.

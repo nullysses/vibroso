@@ -109,6 +109,10 @@ class CausalSelfAttention(nn.Module):
             k,
             v,
             dropout_p=self.dropout if self.training else 0.0,
+            # When there is no cache, this is the full prompt/training path and SDPA
+            # must apply a causal mask. When a KV cache exists, q contains only the new
+            # token positions and k/v contain only past + current tokens, so there are no
+            # future tokens to mask.
             is_causal=kv_cache is None,
         )
         y = y.transpose(1, 2).contiguous().view(b, t, c)
