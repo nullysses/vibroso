@@ -151,6 +151,8 @@ class InferenceConfig:
     top_k: int | None = None
     device: str = "auto"
     seed: int | None = None
+    stop: list[str] | None = None
+    keep_stop: bool = False
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "InferenceConfig":
@@ -158,7 +160,11 @@ class InferenceConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "InferenceConfig":
-        config = cls(**dict(data))
+        values = dict(data)
+        stop = values.get("stop")
+        if isinstance(stop, str):
+            values["stop"] = [stop]
+        config = cls(**values)
         config.validate()
         return config
 
@@ -184,6 +190,11 @@ class InferenceConfig:
             raise ValueError("top_k must be > 0 when provided")
         if not self.device:
             raise ValueError("device must be non-empty")
+        if self.stop is not None:
+            if not isinstance(self.stop, list) or not self.stop:
+                raise ValueError("stop must be a non-empty list of strings when provided")
+            if any(not isinstance(stop, str) or not stop for stop in self.stop):
+                raise ValueError("stop strings must be non-empty strings")
 
 
 # Backward-compatible name for old imports/checkpoints. New code should use TrainConfig.

@@ -142,6 +142,12 @@ Generation options:
 python scripts/generate.py --checkpoint checkpoints/latest.pt --prompt "hello" --temperature 0.8 --top-k 40
 ```
 
+For instruction-tuned checkpoints, use `--stop` to trim generation at a marker such as `<|end|>`. Pass `--keep-stop` if the marker should remain in the printed text.
+
+```bash
+python scripts/generate.py --checkpoint checkpoints/instruct/latest.pt --prompt "<|user|>\nWhat is a tortilla?\n<|assistant|>\n" --temperature 0.4 --top-k 20 --max-new-tokens 120 --stop "<|end|>"
+```
+
 The default byte-level tokenizer can encode prompts containing characters that were not seen in the training corpus.
 
 ## Inspect Tokenizer

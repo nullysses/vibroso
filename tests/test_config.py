@@ -79,6 +79,8 @@ def test_inference_config_validates_sampling_values():
         InferenceConfig(prompt="hello", temperature=0).validate()
     with pytest.raises(ValueError, match="top_k"):
         InferenceConfig(prompt="hello", top_k=0).validate()
+    with pytest.raises(ValueError, match="stop strings"):
+        InferenceConfig(prompt="hello", stop=[""]).validate()
 
 
 def test_inference_config_cli_style_overrides():
@@ -89,9 +91,21 @@ def test_inference_config_cli_style_overrides():
         temperature=0.8,
         top_k=10,
         device="cpu",
+        stop=["<|end|>"],
+        keep_stop=True,
     )
     updated = config.with_overrides(prompt="world", max_new_tokens=5, top_k=None)
     assert updated.checkpoint == "checkpoints/old.pt"
     assert updated.prompt == "world"
     assert updated.max_new_tokens == 5
     assert updated.top_k == 10
+    assert updated.stop == ["<|end|>"]
+    assert updated.keep_stop is True
+
+
+def test_inference_config_accepts_stop_string_or_list():
+    from_string = InferenceConfig.from_dict({"prompt": "hello", "stop": "<|end|>"})
+    from_list = InferenceConfig.from_dict({"prompt": "hello", "stop": ["<|end|>", "<|user|>"]})
+
+    assert from_string.stop == ["<|end|>"]
+    assert from_list.stop == ["<|end|>", "<|user|>"]

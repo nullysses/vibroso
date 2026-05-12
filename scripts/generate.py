@@ -17,6 +17,89 @@ from toy_llm.model import TinyGPT
 from toy_llm.tokenizer import tokenizer_from_dict
 
 
+def truncate_at_stop(
+    text: str,
+    stop_strings: list[str],
+    keep_stop: bool = False,
+) -> tuple[str, bool]:
+    best_index: int | None = None
+    best_stop: str | None = None
+
+    for stop in stop_strings:
+        idx = text.find(stop)
+        if idx == -1:
+            continue
+        if best_index is None or idx < best_index:
+            best_index = idx
+            best_stop = stop
+
+    if best_index is None or best_stop is None:
+        return text, False
+
+    end = best_index + len(best_stop) if keep_stop else best_index
+    return text[:end], True
+
+
+def apply_stop_to_output(
+    decoded: str,
+    prompt: str,
+    stop_strings: list[str],
+    keep_stop: bool = False,
+) -> tuple[str, bool]:
+    if decoded.startswith(prompt):
+        generated_suffix = decoded[len(prompt) :]
+        truncated_suffix, stopped = truncate_at_stop(
+            generated_suffix,
+            stop_strings,
+            keep_stop=keep_stop,
+        )
+        return prompt + truncated_suffix, stopped
+    return truncate_at_stop(decoded, stop_strings, keep_stop=keep_stop)
+
+
+def generate_text(
+    model: TinyGPT,
+    tokenizer,
+    idx: torch.Tensor,
+    inference_config: InferenceConfig,
+) -> str:
+    stop_strings = inference_config.stop or []
+    if not stop_strings:
+        out = model.generate(
+            idx,
+            max_new_tokens=inference_config.max_new_tokens,
+            temperature=inference_config.temperature,
+            top_k=inference_config.top_k,
+        )
+        return tokenizer.decode(out[0].tolist())
+
+    for _ in range(inference_config.max_new_tokens):
+        idx = model.generate(
+            idx,
+            max_new_tokens=1,
+            temperature=inference_config.temperature,
+            top_k=inference_config.top_k,
+        )
+        decoded = tokenizer.decode(idx[0].tolist())
+        output_text, stopped = apply_stop_to_output(
+            decoded,
+            inference_config.prompt,
+            stop_strings,
+            keep_stop=inference_config.keep_stop,
+        )
+        if stopped:
+            return output_text
+
+    decoded = tokenizer.decode(idx[0].tolist())
+    output_text, _ = apply_stop_to_output(
+        decoded,
+        inference_config.prompt,
+        stop_strings,
+        keep_stop=inference_config.keep_stop,
+    )
+    return output_text
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate text from a tiny GPT checkpoint.")
     parser.add_argument("--config", default=None, help="Optional YAML inference config.")
@@ -27,6 +110,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-k", type=int, default=None)
     parser.add_argument("--device", default=None)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument(
+        "--stop",
+        action="append",
+        default=None,
+        help="Stop generation when this string appears. Can be provided multiple times.",
+    )
+    parser.add_argument(
+        "--keep-stop",
+        action="store_true",
+        default=None,
+        help="Keep the stop string in the printed output instead of trimming it.",
+    )
     return parser.parse_args()
 
 
@@ -42,6 +137,8 @@ def main() -> None:
         top_k=args.top_k,
         device=args.device,
         seed=args.seed,
+        stop=args.stop,
+        keep_stop=args.keep_stop,
     )
     if inference_config.seed is not None:
         torch.manual_seed(inference_config.seed)
@@ -63,13 +160,7 @@ def main() -> None:
 
     prompt_ids = tokenizer.encode(inference_config.prompt)
     idx = torch.tensor([prompt_ids], dtype=torch.long, device=device)
-    out = model.generate(
-        idx,
-        max_new_tokens=inference_config.max_new_tokens,
-        temperature=inference_config.temperature,
-        top_k=inference_config.top_k,
-    )
-    print(tokenizer.decode(out[0].tolist()))
+    print(generate_text(model, tokenizer, idx, inference_config))
 
 
 if __name__ == "__main__":
