@@ -2,7 +2,15 @@ import torch
 import torch.nn as nn
 import pytest
 
-from toy_llm.model import CausalSelfAttention, RMSNorm, TinyGPT, apply_rope, build_rope_cache
+from toy_llm.model import (
+    CausalSelfAttention,
+    FeedForward,
+    RMSNorm,
+    SwiGLUFeedForward,
+    TinyGPT,
+    apply_rope,
+    build_rope_cache,
+)
 
 
 def make_model() -> TinyGPT:
@@ -105,3 +113,56 @@ def test_model_uses_rms_norm_instead_of_layer_norm():
     model = make_model()
     assert any(isinstance(module, RMSNorm) for module in model.modules())
     assert not any(isinstance(module, nn.LayerNorm) for module in model.modules())
+
+
+def test_swiglu_feedforward_preserves_shape():
+    ff = SwiGLUFeedForward(n_embd=16, dropout=0.0)
+    x = torch.randn(4, 8, 16)
+    assert ff(x).shape == x.shape
+
+
+def test_tinygpt_forward_with_gelu_mlp():
+    model = TinyGPT(
+        vocab_size=17,
+        block_size=8,
+        n_embd=16,
+        n_head=4,
+        n_layer=2,
+        dropout=0.0,
+        mlp_type="gelu",
+    )
+    idx = torch.randint(0, 17, (2, 6))
+    logits, loss = model(idx, idx)
+    assert logits.shape == (2, 6, 17)
+    assert loss is not None
+    assert isinstance(model.blocks[0].ffwd, FeedForward)
+
+
+def test_tinygpt_forward_with_swiglu_mlp():
+    model = TinyGPT(
+        vocab_size=17,
+        block_size=8,
+        n_embd=16,
+        n_head=4,
+        n_layer=2,
+        dropout=0.0,
+        mlp_type="swiglu",
+    )
+    idx = torch.randint(0, 17, (2, 6))
+    logits, loss = model(idx, idx)
+    assert logits.shape == (2, 6, 17)
+    assert loss is not None
+    assert isinstance(model.blocks[0].ffwd, SwiGLUFeedForward)
+
+
+def test_tinygpt_rejects_unknown_mlp_type():
+    with pytest.raises(ValueError, match="Unknown mlp_type"):
+        TinyGPT(
+            vocab_size=17,
+            block_size=8,
+            n_embd=16,
+            n_head=4,
+            n_layer=2,
+            dropout=0.0,
+            mlp_type="unknown",
+        )

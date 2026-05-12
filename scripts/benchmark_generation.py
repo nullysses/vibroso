@@ -71,6 +71,7 @@ def main() -> None:
         n_head=train_config.model.n_head,
         n_layer=train_config.model.n_layer,
         dropout=train_config.model.dropout,
+        mlp_type=train_config.model.mlp_type,
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()

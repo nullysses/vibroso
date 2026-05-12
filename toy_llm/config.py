@@ -24,6 +24,7 @@ class ModelConfig:
     n_head: int = 4
     n_layer: int = 2
     dropout: float = 0.1
+    mlp_type: str = "gelu"
 
     def validate(self) -> None:
         if self.n_embd <= 0:
@@ -38,6 +39,8 @@ class ModelConfig:
             raise ValueError("model.n_embd / model.n_head must be even for RoPE")
         if not 0 <= self.dropout < 1:
             raise ValueError("model.dropout must be >= 0 and < 1")
+        if self.mlp_type not in {"gelu", "swiglu"}:
+            raise ValueError("model.mlp_type must be 'gelu' or 'swiglu'")
 
 
 def _parse_model_config(data: dict[str, Any]) -> tuple[dict[str, Any], ModelConfig]:

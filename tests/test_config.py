@@ -1,6 +1,6 @@
 import pytest
 
-from toy_llm.config import Config, InferenceConfig, TrainConfig
+from toy_llm.config import Config, InferenceConfig, ModelConfig, TrainConfig
 
 
 def test_config_alias_points_to_train_config():
@@ -23,6 +23,17 @@ def test_train_config_validates_model_shape():
                 "model": {"n_embd": 12, "n_head": 4, "n_layer": 1, "dropout": 0.0},
             }
         )
+
+
+def test_model_config_rejects_unknown_mlp_type():
+    with pytest.raises(ValueError, match="model.mlp_type"):
+        ModelConfig(mlp_type="unknown").validate()
+
+
+def test_model_config_accepts_swiglu_mlp_type():
+    config = ModelConfig(mlp_type="swiglu")
+    config.validate()
+    assert config.mlp_type == "swiglu"
 
 
 def test_train_config_accepts_sentencepiece_tokenizer_fields():

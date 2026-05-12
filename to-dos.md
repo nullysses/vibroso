@@ -1,7 +1,7 @@
 - [x] custom subword tokenizer → robust byte-level BPE/SentencePiece
 - [x] learned positional embeddings → RoPE
 - [x] LayerNorm → RMSNorm
-- [ ] plain MLP → SwiGLU MLP
+- [x] plain MLP → SwiGLU MLP
 - [x] standard attention → attention with KV cache for generation
 - [x] single config → train/inference configs
 - [ ] base LM only → instruction fine-tuning stage

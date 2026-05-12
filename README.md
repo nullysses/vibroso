@@ -32,6 +32,30 @@ The default tokenizer is a small trainable byte-level BPE tokenizer. It starts w
 
 After tokenizer changes, retrain from scratch instead of resuming older subword checkpoints. Old subword tokenizer payloads are rejected so model weights are not reused with incompatible token IDs.
 
+The Transformer MLP is configurable with `model.mlp_type: gelu` or `model.mlp_type: swiglu`. GELU remains the default for old configs and checkpoints. SwiGLU changes model weights and requires training a new checkpoint with `mlp_type: swiglu`.
+
+MLP options:
+
+```yaml
+model:
+  n_embd: 256
+  n_head: 4
+  n_layer: 4
+  dropout: 0.1
+  mlp_type: gelu    # default baseline
+```
+
+```yaml
+model:
+  n_embd: 256
+  n_head: 4
+  n_layer: 4
+  dropout: 0.1
+  mlp_type: swiglu  # gated MLP, train from scratch
+```
+
+For a full SwiGLU example, use `configs/sentencepiece_swiglu.yaml`.
+
 For large corpora, `tokenizer_train_chars` controls how many leading corpus characters are used to learn BPE merges. The base byte vocabulary still covers any valid UTF-8 text. The Wikipedia config starts with `tokenizer_vocab_size: 2048` and `tokenizer_train_chars: 10000`; increase the training window only after confirming startup time is acceptable.
 
 Wikipedia training has three startup phases before model steps begin: fetch/cache pages, build the tokenizer, then encode the cached corpus. The trainer prints `building tokenizer...` and `encoding dataset...` so you can tell which phase is running.

@@ -142,11 +142,39 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 
+class SwiGLUFeedForward(nn.Module):
+    def __init__(self, n_embd: int, dropout: float, multiple_of: int = 8):
+        super().__init__()
+        hidden_dim = int((8 / 3) * n_embd)
+        hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
+        self.gate_proj = nn.Linear(n_embd, hidden_dim, bias=False)
+        self.up_proj = nn.Linear(n_embd, hidden_dim, bias=False)
+        self.down_proj = nn.Linear(hidden_dim, n_embd, bias=False)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = F.silu(self.gate_proj(x)) * self.up_proj(x)
+        x = self.down_proj(x)
+        return self.dropout(x)
+
+
 class Block(nn.Module):
-    def __init__(self, n_embd: int, n_head: int, block_size: int, dropout: float):
+    def __init__(
+        self,
+        n_embd: int,
+        n_head: int,
+        block_size: int,
+        dropout: float,
+        mlp_type: str = "gelu",
+    ):
         super().__init__()
         self.sa = CausalSelfAttention(n_embd, n_head, block_size, dropout)
-        self.ffwd = FeedForward(n_embd, dropout)
+        if mlp_type == "gelu":
+            self.ffwd = FeedForward(n_embd, dropout)
+        elif mlp_type == "swiglu":
+            self.ffwd = SwiGLUFeedForward(n_embd, dropout)
+        else:
+            raise ValueError(f"Unknown mlp_type: {mlp_type!r}")
         self.ln1 = RMSNorm(n_embd)
         self.ln2 = RMSNorm(n_embd)
 
@@ -175,6 +203,7 @@ class TinyGPT(nn.Module):
         n_head: int,
         n_layer: int,
         dropout: float,
+        mlp_type: str = "gelu",
     ):
         super().__init__()
         if n_embd % n_head != 0:
@@ -185,7 +214,16 @@ class TinyGPT(nn.Module):
         self.block_size = block_size
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         self.blocks = nn.ModuleList(
-            [Block(n_embd, n_head, block_size, dropout) for _ in range(n_layer)]
+            [
+                Block(
+                    n_embd=n_embd,
+                    n_head=n_head,
+                    block_size=block_size,
+                    dropout=dropout,
+                    mlp_type=mlp_type,
+                )
+                for _ in range(n_layer)
+            ]
         )
         self.ln_f = RMSNorm(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size)

@@ -94,6 +94,7 @@ def main() -> None:
         n_head=config.model.n_head,
         n_layer=config.model.n_layer,
         dropout=config.model.dropout,
+        mlp_type=config.model.mlp_type,
     ).to(device)
 
     if args.resume:
@@ -134,6 +135,7 @@ def main() -> None:
             "n_head": config.model.n_head,
             "n_layer": config.model.n_layer,
             "dropout": config.model.dropout,
+            "mlp_type": config.model.mlp_type,
         },
     }
 
