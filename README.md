@@ -22,6 +22,26 @@ pip install -r requirements.txt
 
 Python 3.10 or newer is recommended.
 
+## Quick Start
+
+Train a tiny local model:
+
+```bash
+python scripts/train.py --config configs/tiny.yaml
+```
+
+Generate from the latest checkpoint:
+
+```bash
+python scripts/generate.py --checkpoint checkpoints/latest.pt --prompt "hello" --max-new-tokens 300
+```
+
+Fine-tune an instruction dataset from a base checkpoint:
+
+```bash
+python scripts/train.py --config configs/instruction_seed.yaml --init-from checkpoints/base/latest.pt
+```
+
 ## Train
 
 Put a UTF-8 text corpus at `data/input.txt`, then run:
@@ -32,13 +52,39 @@ python scripts/train.py --config configs/tiny.yaml
 
 Checkpoints are written to `checkpoints/latest.pt`.
 
-The default tokenizer is a small trainable byte-level BPE tokenizer. It starts with all 256 byte values, learns frequent adjacent byte-token merges from the training corpus, and stores the learned merges in the checkpoint. Use `tokenizer_kind: char` in a config if you want the original character-level behavior, or `tokenizer_kind: sentencepiece` for the optimized SentencePiece backend.
+The trainer prints startup timing for loading the corpus, building or loading the tokenizer, encoding the dataset, initializing the model, and printing startup stats. Training metrics can also be written to JSONL:
+
+```bash
+python scripts/train.py --config configs/tiny.yaml --metrics runs/tiny_metrics.jsonl
+```
+
+On CUDA devices, training uses bf16 mixed precision with PyTorch autocast and GradScaler. CPU and MPS training leave autocast disabled.
+
+### Tokenizers
+
+The default tokenizer is a small trainable byte-level BPE tokenizer. It starts with all 256 byte values, learns frequent adjacent byte-token merges from the training corpus, and stores the learned merges in the checkpoint.
+
+Supported `tokenizer_kind` values:
+
+```yaml
+tokenizer_kind: subword       # default byte-level BPE
+tokenizer_kind: char          # original character-level tokenizer
+tokenizer_kind: sentencepiece # SentencePiece backend
+```
 
 After tokenizer changes, retrain from scratch instead of resuming older subword checkpoints. Old subword tokenizer payloads are rejected so model weights are not reused with incompatible token IDs.
 
-The Transformer MLP is configurable with `model.mlp_type: gelu` or `model.mlp_type: swiglu`. GELU remains the default for old configs and checkpoints. SwiGLU changes model weights and requires training a new checkpoint with `mlp_type: swiglu`.
+For large corpora, `tokenizer_train_chars` controls how many leading corpus characters are used to learn BPE merges. The base byte vocabulary still covers any valid UTF-8 text. The Wikipedia config starts with `tokenizer_vocab_size: 2048` and `tokenizer_train_chars: 10000`; increase the training window only after confirming startup time is acceptable.
 
-MLP options:
+SentencePiece example:
+
+```bash
+python scripts/train.py --config configs/sentencepiece.yaml
+```
+
+### Model Options
+
+The Transformer uses RoPE positional encoding, RMSNorm blocks, batched causal self-attention, and KV-cache generation. The MLP is configurable with `model.mlp_type: gelu` or `model.mlp_type: swiglu`. GELU remains the default for old configs and checkpoints. SwiGLU changes model weights and requires training a new checkpoint with `mlp_type: swiglu`.
 
 ```yaml
 model:
@@ -60,11 +106,9 @@ model:
 
 For a full SwiGLU example, use `configs/sentencepiece_swiglu.yaml`.
 
-For large corpora, `tokenizer_train_chars` controls how many leading corpus characters are used to learn BPE merges. The base byte vocabulary still covers any valid UTF-8 text. The Wikipedia config starts with `tokenizer_vocab_size: 2048` and `tokenizer_train_chars: 10000`; increase the training window only after confirming startup time is acceptable.
-
 Wikipedia training has three startup phases before model steps begin: fetch/cache pages, build the tokenizer, then encode the cached corpus. The trainer prints `building tokenizer...` and `encoding dataset...` so you can tell which phase is running.
 
-On CUDA devices, training uses bf16 mixed precision with PyTorch autocast and GradScaler. CPU and MPS training leave autocast disabled.
+### Dataset Sources
 
 To train from a list of URLs, put one URL per line in `data/my_links_corpus.txt` and run:
 
@@ -89,6 +133,8 @@ python scripts/train.py --config configs/wikipedia.yaml
 ```
 
 `dataset_kind: wikipedia_titles` uses the `wikipedia-api` package, calls `page(title).text` for each listed title, caches the combined text at `data/fetched_wikipedia_corpus.txt`, and trains from that cache on later runs.
+
+### Resume vs Fine-Tune
 
 To resume training:
 
@@ -124,10 +170,18 @@ Train the tiny example:
 python scripts/train.py --config configs/instruction_tiny.yaml
 ```
 
-Instruction prompts should use the same markers:
+Fine-tune from a base checkpoint with the larger example config:
 
 ```bash
-python scripts/generate.py --checkpoint checkpoints/instruct/latest.pt --prompt "<|user|>\nWhat is a tortilla?\n<|assistant|>\n" --temperature 0.4 --top-k 20 --max-new-tokens 120
+python scripts/train.py --config configs/instruction_seed.yaml --init-from checkpoints/base/latest.pt
+```
+
+Instruction prompts should use the same markers:
+
+```text
+<|user|>
+What is a tortilla?
+<|assistant|>
 ```
 
 ## Generate
@@ -148,7 +202,47 @@ For instruction-tuned checkpoints, use `--stop` to trim generation at a marker s
 python scripts/generate.py --checkpoint checkpoints/instruct/latest.pt --prompt "<|user|>\nWhat is a tortilla?\n<|assistant|>\n" --temperature 0.4 --top-k 20 --max-new-tokens 120 --stop "<|end|>"
 ```
 
+Generation can also use a YAML config:
+
+```bash
+python scripts/generate.py --config configs/inference.yaml
+```
+
+Inference config example:
+
+```yaml
+checkpoint: checkpoints/instruct_seed123/latest.pt
+prompt: |
+  <|user|>
+  What is a tortilla?
+  <|assistant|>
+max_new_tokens: 120
+temperature: 0.35
+top_k: 20
+stop:
+  - "<|end|>"
+keep_stop: false
+device: auto
+seed: 1337
+```
+
 The default byte-level tokenizer can encode prompts containing characters that were not seen in the training corpus.
+
+## Benchmarks
+
+Benchmark tokenizer compression for a training config:
+
+```bash
+python scripts/benchmark_tokenizer.py --config configs/wikipedia.yaml --output runs/tokenizer_benchmark.json
+```
+
+Benchmark generation samples from a checkpoint:
+
+```bash
+python scripts/benchmark_generation.py --checkpoint checkpoints/latest.pt --max-new-tokens 100 --output runs/generation_benchmark.txt
+```
+
+`scripts/benchmark_generation.py` uses built-in prompts unless `benchmarks/prompts.txt` exists or `--prompt-file` is provided. Separate prompt blocks with `---`.
 
 ## Inspect Tokenizer
 
@@ -190,6 +284,30 @@ python scripts/inspect_checkpoint_tokenizer.py --checkpoint checkpoints/latest.p
 
 ```bash
 pytest
+```
+
+## Config Reference
+
+Common training fields:
+
+```yaml
+dataset_path: data/input.txt
+dataset_kind: text              # text, url_list, wikipedia_titles, instruction_jsonl
+tokenizer_kind: subword         # subword, char, sentencepiece
+checkpoint_dir: checkpoints
+device: auto                    # auto, cuda, mps, cpu
+batch_size: 16
+block_size: 64
+max_steps: 2000
+learning_rate: 0.001
+weight_decay: 0.1
+
+model:
+  n_embd: 128
+  n_head: 4
+  n_layer: 2
+  dropout: 0.1
+  mlp_type: gelu                # gelu, swiglu
 ```
 
 ## Project Layout

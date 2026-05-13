@@ -1,4 +1,4 @@
-dataset_path: data/instruction_seed_123.jsonl
+dataset_path: data/vibroso_tiny_instruction_seed.jsonl
 dataset_kind: instruction_jsonl
 
 # During --init-from, the tokenizer is loaded from the base checkpoint.
