@@ -299,6 +299,11 @@ def train_sentencepiece_tokenizer(
         pad_id=-1,
         unk_id=0,
         hard_vocab_limit=False,
+        user_defined_symbols=[
+        "<|user|>",
+        "<|assistant|>",
+        "<|end|>",
+    ],
     )
     return SentencePieceTokenizer(prefix_path.with_suffix(".model"))
 
